@@ -10,6 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/interface-cloudsync-connector.php';
 
 /**
  * Handles communication with Microsoft Graph (SharePoint/OneDrive).
@@ -24,7 +25,7 @@ require_once __DIR__ . '/helpers.php';
  *    endpoints such as `/sites/{site-id}/drive/items`.
  * 4. Ensure the responses return the folder ID so it can be persisted in `_sp_folder_id`.
  */
-class Connector_SharePoint {
+class Connector_SharePoint implements CloudSync_Connector_Interface {
 
     /**
      * Creates a folder in SharePoint/OneDrive.

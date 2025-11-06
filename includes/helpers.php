@@ -48,6 +48,47 @@ function cloudsync_get_settings() {
 }
 
 /**
+ * Retrieves general dashboard settings.
+ *
+ * @since 4.1.0
+ *
+ * @return array<string, mixed> Option values for the dashboard behaviour.
+ */
+function cloudsync_get_general_settings() {
+    $defaults = array(
+        'sync_interval'      => '10',
+        'auto_sync'          => 1,
+        'priority_mode'      => 'bidirectional',
+        'root_google'        => '',
+        'root_dropbox'       => '',
+        'root_sharepoint'    => '',
+        'email_notifications'=> 0,
+        'developer_mode'     => 0,
+    );
+
+    $settings = get_option( 'cloudsync_general_settings', array() );
+
+    if ( empty( $settings ) || ! is_array( $settings ) ) {
+        return $defaults;
+    }
+
+    return array_merge( $defaults, $settings );
+}
+
+/**
+ * Persists general dashboard settings.
+ *
+ * @since 4.1.0
+ *
+ * @param array<string, mixed> $settings Settings to save.
+ *
+ * @return void
+ */
+function cloudsync_save_general_settings( $settings ) {
+    update_option( 'cloudsync_general_settings', $settings );
+}
+
+/**
  * Stores cloud sync settings in the options table.
  *
  * @since 4.0.0

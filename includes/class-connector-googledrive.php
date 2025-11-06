@@ -10,11 +10,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/interface-cloudsync-connector.php';
 
 /**
  * Handles communication with the Google Drive API.
  */
-class Connector_GoogleDrive {
+class Connector_GoogleDrive implements CloudSync_Connector_Interface {
 
     /**
      * Google Drive API base URL.
@@ -69,12 +70,7 @@ class Connector_GoogleDrive {
 
         $data = json_decode( wp_remote_retrieve_body( $response ), true );
 
-        if ( isset( $data['id'] ) ) {
-            do_action( 'cloudsync_after_create_course', 0, $data['id'] );
-            return $data['id'];
-        }
-
-        return null;
+        return isset( $data['id'] ) ? $data['id'] : null;
     }
 
     /**

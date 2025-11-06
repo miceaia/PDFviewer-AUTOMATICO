@@ -10,11 +10,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/interface-cloudsync-connector.php';
 
 /**
  * Handles communication with the Dropbox API.
  */
-class Connector_Dropbox {
+class Connector_Dropbox implements CloudSync_Connector_Interface {
 
     /**
      * Creates a folder in Dropbox.
@@ -24,9 +25,9 @@ class Connector_Dropbox {
      * @param string      $name      Folder name.
      * @param string|null $parent_id Optional parent identifier.
      *
-     * @return string|null Dropbox folder ID or null on failure.
+     * @return string|null Dropbox folder path (lowercase) or null on failure.
      *
-     * @example \Connector_Dropbox::create_folder( 'Curso Algebra', 'id:parent' );
+     * @example \Connector_Dropbox::create_folder( 'Curso Algebra', '/cursos' );
      */
     public function create_folder( $name, $parent_id = null ) {
         $token = $this->get_access_token();
@@ -69,12 +70,7 @@ class Connector_Dropbox {
 
         $data = json_decode( wp_remote_retrieve_body( $response ), true );
 
-        if ( isset( $data['metadata']['id'] ) ) {
-            do_action( 'cloudsync_after_create_course', 0, $data['metadata']['id'] );
-            return $data['metadata']['id'];
-        }
-
-        return null;
+        return isset( $data['metadata']['path_lower'] ) ? $data['metadata']['path_lower'] : null;
     }
 
     /**

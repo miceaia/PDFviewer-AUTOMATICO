@@ -10,6 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 require_once __DIR__ . '/helpers.php';
+require_once __DIR__ . '/interface-cloudsync-connector.php';
 require_once __DIR__ . '/class-connector-googledrive.php';
 require_once __DIR__ . '/class-connector-dropbox.php';
 require_once __DIR__ . '/class-connector-sharepoint.php';
@@ -83,11 +84,18 @@ class CloudSync_Manager {
 
         add_action( 'admin_menu', array( $this, 'register_admin_pages' ) );
 
+        add_filter( 'cron_schedules', array( $this, 'register_custom_schedules' ) );
+
+        add_action( 'admin_post_cloudsync_manual_sync', array( $this, 'handle_manual_sync' ) );
+        add_action( 'admin_post_cloudsync_cleanup_meta', array( $this, 'handle_cleanup_meta' ) );
+        add_action( 'admin_post_cloudsync_reset_tokens', array( $this, 'handle_reset_tokens' ) );
+        add_action( 'admin_post_cloudsync_rebuild_structure', array( $this, 'handle_rebuild_structure' ) );
+        add_action( 'admin_post_cloudsync_toggle_dev_mode', array( $this, 'handle_toggle_dev_mode' ) );
+        add_action( 'admin_post_cloudsync_download_logs', array( $this, 'handle_download_logs' ) );
+
         add_action( self::CRON_HOOK, array( $this, 'pull_remote_changes' ) );
 
-        if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
-            wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', self::CRON_HOOK );
-        }
+        $this->ensure_cron_schedule();
     }
 
     /**
@@ -135,7 +143,8 @@ class CloudSync_Manager {
      * @return void
      */
     public function register_settings() {
-        register_setting( 'cloudsync_settings_group', 'cloudsync_settings', array( $this, 'sanitize_settings' ) );
+        register_setting( 'cloudsync_oauth', 'cloudsync_settings', array( $this, 'sanitize_settings' ) );
+        register_setting( 'cloudsync_general', 'cloudsync_general_settings', array( $this, 'sanitize_general_settings' ) );
     }
 
     /**
@@ -172,46 +181,196 @@ class CloudSync_Manager {
     }
 
     /**
+     * Sanitizes the general dashboard settings.
+     *
+     * @since 4.1.0
+     *
+     * @param array<string, mixed> $settings Raw settings submitted by the admin.
+     *
+     * @return array<string, mixed> Clean settings ready to be persisted.
+     */
+    public function sanitize_general_settings( $settings ) {
+        $defaults = cloudsync_get_general_settings();
+
+        $clean = array(
+            'sync_interval'       => isset( $settings['sync_interval'] ) ? sanitize_text_field( $settings['sync_interval'] ) : $defaults['sync_interval'],
+            'auto_sync'           => isset( $settings['auto_sync'] ) ? 1 : 0,
+            'priority_mode'       => isset( $settings['priority_mode'] ) ? sanitize_text_field( $settings['priority_mode'] ) : $defaults['priority_mode'],
+            'root_google'         => isset( $settings['root_google'] ) ? sanitize_text_field( $settings['root_google'] ) : '',
+            'root_dropbox'        => isset( $settings['root_dropbox'] ) ? sanitize_text_field( $settings['root_dropbox'] ) : '',
+            'root_sharepoint'     => isset( $settings['root_sharepoint'] ) ? sanitize_text_field( $settings['root_sharepoint'] ) : '',
+            'email_notifications' => isset( $settings['email_notifications'] ) ? 1 : 0,
+            'developer_mode'      => isset( $settings['developer_mode'] ) ? 1 : 0,
+        );
+
+        $valid_intervals = array( '5', '10', '30', 'manual' );
+        if ( ! in_array( $clean['sync_interval'], $valid_intervals, true ) ) {
+            $clean['sync_interval'] = $defaults['sync_interval'];
+        }
+
+        $valid_priority = array( 'wp', 'cloud', 'bidirectional' );
+        if ( ! in_array( $clean['priority_mode'], $valid_priority, true ) ) {
+            $clean['priority_mode'] = $defaults['priority_mode'];
+        }
+
+        cloudsync_save_general_settings( $clean );
+
+        $this->ensure_cron_schedule();
+
+        return get_option( 'cloudsync_general_settings', $defaults );
+    }
+
+    /**
+     * Registers custom cron schedules used by the dashboard settings.
+     *
+     * @since 4.1.0
+     *
+     * @param array<string, array<string, mixed>> $schedules Existing schedules.
+     *
+     * @return array<string, array<string, mixed>> Modified schedules list.
+     */
+    public function register_custom_schedules( $schedules ) {
+        $schedules['five_minutes'] = array(
+            'interval' => 5 * MINUTE_IN_SECONDS,
+            'display'  => __( 'Cada 5 minutos', 'secure-pdf-viewer' ),
+        );
+
+        $schedules['ten_minutes'] = array(
+            'interval' => 10 * MINUTE_IN_SECONDS,
+            'display'  => __( 'Cada 10 minutos', 'secure-pdf-viewer' ),
+        );
+
+        $schedules['thirty_minutes'] = array(
+            'interval' => 30 * MINUTE_IN_SECONDS,
+            'display'  => __( 'Cada 30 minutos', 'secure-pdf-viewer' ),
+        );
+
+        return $schedules;
+    }
+
+    /**
+     * Ensures the cron schedule matches the admin configuration.
+     *
+     * @since 4.1.0
+     *
+     * @return void
+     */
+    protected function ensure_cron_schedule() {
+        $settings = cloudsync_get_general_settings();
+        $timestamp = wp_next_scheduled( self::CRON_HOOK );
+
+        if ( empty( $settings['auto_sync'] ) || 'manual' === $settings['sync_interval'] ) {
+            if ( $timestamp ) {
+                wp_unschedule_event( $timestamp, self::CRON_HOOK );
+            }
+
+            update_option( 'cloudsync_current_schedule', 'manual' );
+            return;
+        }
+
+        $map = array(
+            '5'   => 'five_minutes',
+            '10'  => 'ten_minutes',
+            '30'  => 'thirty_minutes',
+        );
+
+        $schedule = isset( $map[ $settings['sync_interval'] ] ) ? $map[ $settings['sync_interval'] ] : 'hourly';
+        $current  = get_option( 'cloudsync_current_schedule', '' );
+
+        if ( $timestamp && $current === $schedule ) {
+            return;
+        }
+
+        if ( $timestamp ) {
+            wp_unschedule_event( $timestamp, self::CRON_HOOK );
+        }
+
+        wp_schedule_event( time() + MINUTE_IN_SECONDS, $schedule, self::CRON_HOOK );
+        update_option( 'cloudsync_current_schedule', $schedule );
+    }
+
+    /**
      * Registers settings and log admin pages.
      *
      * @since 4.0.0
      */
     public function register_admin_pages() {
-        add_submenu_page(
-            'options-general.php',
-            __( 'Cloud Sync', 'secure-pdf-viewer' ),
-            __( 'Cloud Sync', 'secure-pdf-viewer' ),
+        require_once SPV_PLUGIN_PATH . 'admin/dashboard.php';
+
+        add_menu_page(
+            __( 'CloudSync LMS', 'secure-pdf-viewer' ),
+            __( 'CloudSync LMS', 'secure-pdf-viewer' ),
             'manage_options',
-            'cloudsync-settings',
-            array( $this, 'render_settings_page' )
+            'cloudsync-dashboard',
+            array( $this, 'render_dashboard_page' ),
+            'dashicons-cloud',
+            3
         );
 
         add_submenu_page(
-            null,
-            __( 'Cloud Sync Logs', 'secure-pdf-viewer' ),
-            __( 'Cloud Sync Logs', 'secure-pdf-viewer' ),
+            'cloudsync-dashboard',
+            __( 'Configuración general', 'secure-pdf-viewer' ),
+            __( 'Configuración general', 'secure-pdf-viewer' ),
             'manage_options',
-            'cloudsync-logs',
-            array( $this, 'render_logs_page' )
+            'cloudsync-dashboard',
+            array( $this, 'render_dashboard_page' )
+        );
+
+        add_submenu_page(
+            'cloudsync-dashboard',
+            __( 'Credenciales OAuth', 'secure-pdf-viewer' ),
+            __( 'Credenciales OAuth', 'secure-pdf-viewer' ),
+            'manage_options',
+            'cloudsync-dashboard-oauth',
+            array( $this, 'render_dashboard_page' )
+        );
+
+        add_submenu_page(
+            'cloudsync-dashboard',
+            __( 'Sincronización', 'secure-pdf-viewer' ),
+            __( 'Sincronización', 'secure-pdf-viewer' ),
+            'manage_options',
+            'cloudsync-dashboard-sync',
+            array( $this, 'render_dashboard_page' )
+        );
+
+        add_submenu_page(
+            'cloudsync-dashboard',
+            __( 'Monitor / Logs', 'secure-pdf-viewer' ),
+            __( 'Monitor / Logs', 'secure-pdf-viewer' ),
+            'manage_options',
+            'cloudsync-dashboard-logs',
+            array( $this, 'render_dashboard_page' )
+        );
+
+        add_submenu_page(
+            'cloudsync-dashboard',
+            __( 'Herramientas avanzadas', 'secure-pdf-viewer' ),
+            __( 'Herramientas avanzadas', 'secure-pdf-viewer' ),
+            'manage_options',
+            'cloudsync-dashboard-advanced',
+            array( $this, 'render_dashboard_page' )
         );
     }
 
     /**
-     * Renders the settings page wrapper.
+     * Renders the dashboard UI.
      *
      * @since 4.0.0
      */
-    public function render_settings_page() {
-        require_once SPV_PLUGIN_PATH . 'admin/settings-page.php';
-    }
+    public function render_dashboard_page() {
+        $current_page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : 'cloudsync-dashboard';
+        $tab_map      = array(
+            'cloudsync-dashboard'           => 'general',
+            'cloudsync-dashboard-oauth'     => 'oauth',
+            'cloudsync-dashboard-sync'      => 'sync',
+            'cloudsync-dashboard-logs'      => 'logs',
+            'cloudsync-dashboard-advanced'  => 'advanced',
+        );
 
-    /**
-     * Renders the logs page wrapper.
-     *
-     * @since 4.0.0
-     */
-    public function render_logs_page() {
-        require_once SPV_PLUGIN_PATH . 'admin/logs.php';
+        $active_tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : ( isset( $tab_map[ $current_page ] ) ? $tab_map[ $current_page ] : 'general' );
+
+        cloudsync_render_admin_page( $active_tab );
     }
 
     /**
@@ -288,15 +447,21 @@ class CloudSync_Manager {
      * @param string   $name     Folder name.
      */
     protected function create_remote_folder( $post, $meta_key, $name ) {
+        $parent_id = $this->determine_parent_remote_id( $post, $meta_key );
+
+        if ( 'leccion' === $post->post_type && null === $parent_id ) {
+            return;
+        }
+
         switch ( $meta_key ) {
             case '_gd_folder_id':
-                $id = $this->google->create_folder( $name );
+                $id = $this->google->create_folder( $name, $parent_id );
                 break;
             case '_dbx_folder_id':
-                $id = $this->dropbox->create_folder( $name );
+                $id = $this->dropbox->create_folder( $name, $parent_id );
                 break;
             case '_sp_folder_id':
-                $id = $this->sharepoint->create_folder( $name );
+                $id = $this->sharepoint->create_folder( $name, $parent_id );
                 break;
             default:
                 $id = null;
@@ -304,7 +469,10 @@ class CloudSync_Manager {
 
         if ( ! empty( $id ) ) {
             update_post_meta( $post->ID, $meta_key, $id );
-            do_action( 'cloudsync_after_create_course', $post->ID, $id );
+
+            if ( 'curso' === $post->post_type ) {
+                do_action( 'cloudsync_after_create_course', $post->ID, $id );
+            }
         }
     }
 
@@ -351,6 +519,46 @@ class CloudSync_Manager {
                 $this->sharepoint->delete_folder( $remote_id );
                 break;
         }
+    }
+
+    /**
+     * Determines the parent remote identifier for lessons.
+     *
+     * @since 4.0.1
+     *
+     * @param \WP_Post $post     Post instance.
+     * @param string   $meta_key Remote meta key.
+     *
+     * @return string|null Parent remote identifier when available.
+     */
+    protected function determine_parent_remote_id( $post, $meta_key ) {
+        if ( 'leccion' !== $post->post_type ) {
+            return null;
+        }
+
+        if ( empty( $post->post_parent ) ) {
+            return null;
+        }
+
+        $parent_remote_id = get_post_meta( (int) $post->post_parent, $meta_key, true );
+
+        if ( empty( $parent_remote_id ) ) {
+            return null;
+        }
+
+        if ( '_dbx_folder_id' === $meta_key && false === strpos( $parent_remote_id, '/' ) ) {
+            cloudsync_add_log(
+                __( 'Dropbox parent folder path missing; skipping lesson folder creation.', 'secure-pdf-viewer' ),
+                array(
+                    'lesson_id' => $post->ID,
+                    'parent_id' => (int) $post->post_parent,
+                )
+            );
+
+            return null;
+        }
+
+        return $parent_remote_id;
     }
 
     /**
@@ -454,6 +662,209 @@ class CloudSync_Manager {
         if ( $post_id && ! is_wp_error( $post_id ) ) {
             update_post_meta( $post_id, $meta_key, $remote_id );
             cloudsync_add_log( __( 'Course created from remote folder', 'secure-pdf-viewer' ), array( 'post_id' => $post_id ) );
+        }
+    }
+
+    /**
+     * Handles manual synchronization from the dashboard.
+     *
+     * @since 4.1.0
+     */
+    public function handle_manual_sync() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to run synchronisation.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_manual_sync' );
+
+        $this->pull_remote_changes();
+        $this->sync_all_posts();
+
+        update_option( 'cloudsync_last_sync', current_time( 'timestamp' ) );
+        cloudsync_add_log( __( 'Manual synchronisation executed from dashboard.', 'secure-pdf-viewer' ) );
+
+        wp_safe_redirect( add_query_arg( array( 'page' => 'cloudsync-dashboard-sync', 'cloudsync_notice' => 'manual-sync' ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Purges orphaned metadata entries.
+     *
+     * @since 4.1.0
+     */
+    public function handle_cleanup_meta() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to clean metadata.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_cleanup_meta' );
+
+        global $wpdb;
+
+        $allowed_meta = array( '_gd_folder_id', '_dbx_folder_id', '_sp_folder_id' );
+        $meta_placeholders = implode( ',', array_fill( 0, count( $allowed_meta ), '%s' ) );
+
+        $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+            $wpdb->prepare(
+                "DELETE pm FROM {$wpdb->postmeta} pm LEFT JOIN {$wpdb->posts} p ON pm.post_id = p.ID WHERE pm.meta_key IN ($meta_placeholders) AND (p.ID IS NULL OR (p.post_type NOT IN ('curso','leccion')))",
+                $allowed_meta
+            )
+        );
+
+        cloudsync_add_log( __( 'Orphaned metadata cleaned from dashboard tools.', 'secure-pdf-viewer' ) );
+
+        wp_safe_redirect( add_query_arg( array( 'page' => 'cloudsync-dashboard-advanced', 'cloudsync_notice' => 'cleanup' ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Resets stored OAuth tokens.
+     *
+     * @since 4.1.0
+     */
+    public function handle_reset_tokens() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to reset tokens.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_reset_tokens' );
+
+        $settings = cloudsync_get_settings();
+        $service = isset( $_REQUEST['service'] ) ? sanitize_key( wp_unslash( $_REQUEST['service'] ) ) : '';
+
+        $map = array(
+            'google'     => 'google_refresh_token',
+            'dropbox'    => 'dropbox_refresh_token',
+            'sharepoint' => 'sharepoint_refresh_token',
+        );
+
+        if ( $service && isset( $map[ $service ] ) ) {
+            $settings[ $map[ $service ] ] = '';
+            $label = ucfirst( $service );
+            cloudsync_add_log( sprintf( __( 'OAuth tokens cleared for %s.', 'secure-pdf-viewer' ), $label ), array( 'service' => $service ) );
+        } else {
+            foreach ( $map as $token_key ) {
+                $settings[ $token_key ] = '';
+            }
+            cloudsync_add_log( __( 'OAuth tokens cleared from dashboard.', 'secure-pdf-viewer' ) );
+        }
+
+        cloudsync_save_settings( $settings );
+
+        $redirect = wp_get_referer();
+        if ( ! $redirect ) {
+            $redirect = admin_url( 'admin.php?page=cloudsync-dashboard-advanced' );
+        }
+
+        $redirect = add_query_arg( 'cloudsync_notice', 'reset-tokens', $redirect );
+
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    /**
+     * Rebuilds the remote folder structure.
+     *
+     * @since 4.1.0
+     */
+    public function handle_rebuild_structure() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to rebuild folders.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_rebuild_structure' );
+
+        $posts = get_posts(
+            array(
+                'post_type'      => array( 'curso', 'leccion' ),
+                'post_status'    => array( 'publish', 'draft', 'pending', 'private' ),
+                'posts_per_page' => -1,
+            )
+        );
+
+        foreach ( $posts as $post ) {
+            foreach ( array( '_gd_folder_id', '_dbx_folder_id', '_sp_folder_id' ) as $meta_key ) {
+                delete_post_meta( $post->ID, $meta_key );
+            }
+
+            $this->maybe_sync_post( $post->ID, $post );
+        }
+
+        cloudsync_add_log( __( 'Folder structure reinitialised from dashboard.', 'secure-pdf-viewer' ) );
+
+        wp_safe_redirect( add_query_arg( array( 'page' => 'cloudsync-dashboard-advanced', 'cloudsync_notice' => 'rebuild' ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Toggles developer mode visualisations.
+     *
+     * @since 4.1.0
+     */
+    public function handle_toggle_dev_mode() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to change developer mode.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_toggle_dev_mode' );
+
+        $settings = cloudsync_get_general_settings();
+        $settings['developer_mode'] = isset( $_POST['developer_mode'] ) ? 1 : 0;
+
+        cloudsync_save_general_settings( $settings );
+        cloudsync_add_log( __( 'Developer mode preference updated.', 'secure-pdf-viewer' ) );
+
+        $redirect = wp_get_referer();
+        if ( ! $redirect ) {
+            $redirect = admin_url( 'admin.php?page=cloudsync-dashboard-advanced' );
+        }
+
+        $redirect = add_query_arg( 'cloudsync_notice', 'developer-mode', $redirect );
+
+        wp_safe_redirect( $redirect );
+        exit;
+    }
+
+    /**
+     * Streams log entries as a JSON download.
+     *
+     * @since 4.1.0
+     */
+    public function handle_download_logs() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to download logs.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_download_logs' );
+
+        $logs = cloudsync_get_logs();
+
+        nocache_headers();
+        header( 'Content-Type: application/json; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="cloudsync-logs-' . gmdate( 'Ymd-His' ) . '.json"' );
+
+        echo wp_json_encode( $logs ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        exit;
+    }
+
+    /**
+     * Ensures every existing course and lesson is synchronised.
+     *
+     * @since 4.1.0
+     *
+     * @return void
+     */
+    protected function sync_all_posts() {
+        $posts = get_posts(
+            array(
+                'post_type'      => array( 'curso', 'leccion' ),
+                'post_status'    => array( 'publish', 'draft', 'pending', 'private' ),
+                'posts_per_page' => -1,
+            )
+        );
+
+        foreach ( $posts as $post ) {
+            $this->maybe_sync_post( $post->ID, $post );
         }
     }
 }

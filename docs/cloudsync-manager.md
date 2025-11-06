@@ -3,6 +3,8 @@
 ## Description
 `CloudSync_Manager` centralises the two-way synchronisation between WordPress custom post types (`curso` and `leccion`) and supported cloud providers. It registers the required post types, hooks into save/delete events, and coordinates cron jobs that poll remote APIs.
 
+When a lesson (`leccion`) is stored it resolves the parent course folder first, guaranteeing that sub-folders are created beneath the correct course container across every connector.
+
 ## Usage
 ```php
 $manager = new CloudSync_Manager();
@@ -13,7 +15,7 @@ This bootstrapper should run during the `plugins_loaded` lifecycle (already hand
 
 ## Actions
 - `cloudsync_after_create_course( int $post_id, string $folder_id )`
-  Fired every time a new remote folder is created or linked to a course/lesson. Use this to enqueue background tasks or to register additional metadata.
+  Fired when a new remote folder is linked to a **course**. Use this to enqueue background tasks or to register additional metadata for that course record.
 
 ## Filters
 - `cloudsync_course_folder_name( string $name, int $post_id )`
@@ -24,7 +26,7 @@ This bootstrapper should run during the `plugins_loaded` lifecycle (already hand
 - `cloudsync_add_log( string $message, array $context = [] )` persists diagnostic entries visible under `Tools → Cloud Sync Logs`.
 
 ## Extending Connectors
-Each connector implements the following methods:
+Each connector must implement [`CloudSync_Connector_Interface`](../includes/interface-cloudsync-connector.php) which declares the following methods:
 
 ```php
 public function create_folder( $name, $parent_id = null );

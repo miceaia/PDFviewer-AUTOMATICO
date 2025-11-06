@@ -25,6 +25,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
             'oauth'    => __( 'Credenciales', 'secure-pdf-viewer' ),
             'sync'     => __( 'Sincronización', 'secure-pdf-viewer' ),
             'logs'     => __( 'Logs', 'secure-pdf-viewer' ),
+            'explorer' => __( 'Explorador', 'secure-pdf-viewer' ),
             'advanced' => __( 'Avanzado', 'secure-pdf-viewer' ),
         );
 
@@ -32,9 +33,10 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
             $active_tab = 'general';
         }
 
-        $general_settings = cloudsync_get_general_settings();
-        $oauth_settings   = cloudsync_get_settings();
-        $logs             = cloudsync_get_logs();
+        $general_settings    = cloudsync_get_general_settings();
+        $oauth_settings      = cloudsync_get_settings();
+        $logs                = cloudsync_get_logs();
+        $service_definitions = cloudsync_get_service_definitions();
         $notice           = isset( $_GET['cloudsync_notice'] ) ? sanitize_key( wp_unslash( $_GET['cloudsync_notice'] ) ) : '';
 
         $last_sync = (int) get_option( 'cloudsync_last_sync', 0 );
@@ -45,10 +47,28 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
         $lesson_total  = isset( $lessons->publish ) ? (int) $lessons->publish : 0;
         $recent_logs   = array_slice( array_reverse( $logs ), 0, 10 );
 
+        $explorer_roots = array(
+            'google'     => isset( $general_settings['root_google'] ) ? $general_settings['root_google'] : '',
+            'dropbox'    => isset( $general_settings['root_dropbox'] ) ? $general_settings['root_dropbox'] : '',
+            'sharepoint' => isset( $general_settings['root_sharepoint'] ) ? $general_settings['root_sharepoint'] : '',
+        );
+
         $status_icons = array(
             true  => '<span class="cloudsync-status-badge is-connected"><span class="cloudsync-status-badge__dot" aria-hidden="true"></span>' . esc_html__( 'Conectado', 'secure-pdf-viewer' ) . '</span>',
             false => '<span class="cloudsync-status-badge is-disconnected"><span class="cloudsync-status-badge__dot" aria-hidden="true"></span>' . esc_html__( 'Desconectado', 'secure-pdf-viewer' ) . '</span>',
         );
+
+        $explorer_services_data = array();
+
+        foreach ( $service_definitions as $slug => $definition ) {
+            $token_field = $definition['token_field'];
+            $explorer_services_data[] = array(
+                'slug'      => $slug,
+                'label'     => wp_strip_all_tags( $definition['label'] ),
+                'connected' => ! empty( $oauth_settings[ $token_field ] ),
+                'root'      => isset( $explorer_roots[ $slug ] ) ? $explorer_roots[ $slug ] : '',
+            );
+        }
 
         ?>
         <div class="wrap cloudsync-dashboard">
@@ -189,8 +209,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                     <p class="description"><?php esc_html_e( 'Registra tus llaves OAuth. Los tokens sensibles se cifran automáticamente.', 'secure-pdf-viewer' ); ?></p>
                     <div class="cloudsync-oauth-grid">
                         <?php
-                        $definitions = cloudsync_get_service_definitions();
-                        foreach ( $definitions as $service => $definition ) :
+                        foreach ( $service_definitions as $service => $definition ) :
                             $token_field      = $definition['token_field'];
                             $connected        = ! empty( $oauth_settings[ $token_field ] );
                             $required_fields  = isset( $definition['required_fields'] ) ? $definition['required_fields'] : array();
@@ -396,6 +415,51 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                             <p><strong><?php esc_html_e( 'Fallos registrados:', 'secure-pdf-viewer' ); ?></strong> <?php echo esc_html( (string) count( $error_logs ) ); ?></p>
                             <p><strong><?php esc_html_e( 'Tasa de éxito estimada:', 'secure-pdf-viewer' ); ?></strong> <?php echo esc_html( $success_rate . '%' ); ?></p>
                         </div>
+                    </div>
+                </div>
+            <?php elseif ( 'explorer' === $active_tab ) : ?>
+                <div class="cloudsync-card cloudsync-explorer-card">
+                    <h2><?php esc_html_e( 'Explorador de archivos', 'secure-pdf-viewer' ); ?></h2>
+                    <p class="description"><?php esc_html_e( 'Revisa la estructura sincronizada con Google Drive, Dropbox y SharePoint. Expande cada carpeta para conocer su contenido y abrir elementos directamente en la nube.', 'secure-pdf-viewer' ); ?></p>
+                    <div id="cloudsync-explorer" data-services="<?php echo esc_attr( wp_json_encode( $explorer_services_data ) ); ?>">
+                        <?php foreach ( $service_definitions as $service => $definition ) :
+                            $token_field  = $definition['token_field'];
+                            $connected    = ! empty( $oauth_settings[ $token_field ] );
+                            $service_root = isset( $explorer_roots[ $service ] ) ? $explorer_roots[ $service ] : '';
+                            $badge        = $connected ? $status_icons[ true ] : $status_icons[ false ];
+                            $icon_class   = 'cloudsync-explorer-service__icon--' . $service;
+                        ?>
+                        <section class="cloudsync-explorer-service" data-service="<?php echo esc_attr( $service ); ?>" data-root="<?php echo esc_attr( $service_root ); ?>" data-connected="<?php echo $connected ? '1' : '0'; ?>">
+                            <header class="cloudsync-explorer-service__header">
+                                <div class="cloudsync-explorer-service__title">
+                                    <span class="cloudsync-explorer-service__icon <?php echo esc_attr( $icon_class ); ?>" aria-hidden="true"></span>
+                                    <span class="cloudsync-explorer-service__label"><?php echo esc_html( $definition['label'] ); ?></span>
+                                </div>
+                                <div class="cloudsync-explorer-service__meta">
+                                    <?php echo $badge; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                                    <?php if ( $connected ) : ?>
+                                        <button type="button" class="button button-secondary cloudsync-explorer-refresh" data-service="<?php echo esc_attr( $service ); ?>"><?php esc_html_e( 'Actualizar vista', 'secure-pdf-viewer' ); ?></button>
+                                    <?php endif; ?>
+                                </div>
+                            </header>
+                            <div class="cloudsync-explorer-service__body">
+                                <?php if ( ! $connected ) : ?>
+                                    <div class="notice notice-warning inline">
+                                        <p><?php esc_html_e( 'Conecta este servicio para visualizar sus archivos.', 'secure-pdf-viewer' ); ?></p>
+                                    </div>
+                                <?php else : ?>
+                                    <div class="cloudsync-tree" role="tree" aria-live="polite" aria-busy="false">
+                                        <div class="cloudsync-tree__loading" hidden>
+                                            <span class="spinner is-active"></span>
+                                            <span><?php esc_html_e( 'Cargando...', 'secure-pdf-viewer' ); ?></span>
+                                        </div>
+                                        <div class="cloudsync-tree__error notice notice-error inline" hidden></div>
+                                        <ul class="cloudsync-tree__list" role="group" data-loaded="false"></ul>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </section>
+                        <?php endforeach; ?>
                     </div>
                 </div>
             <?php elseif ( 'advanced' === $active_tab ) : ?>

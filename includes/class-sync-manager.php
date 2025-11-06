@@ -14,6 +14,7 @@ require_once __DIR__ . '/interface-cloudsync-connector.php';
 require_once __DIR__ . '/class-connector-googledrive.php';
 require_once __DIR__ . '/class-connector-dropbox.php';
 require_once __DIR__ . '/class-connector-sharepoint.php';
+require_once __DIR__ . '/class-explorer.php';
 
 /**
  * Coordinates synchronization between WordPress and cloud services.
@@ -68,6 +69,13 @@ class CloudSync_Manager {
     protected $sharepoint;
 
     /**
+     * Explorer REST helper.
+     *
+     * @var CloudSync_Explorer
+     */
+    protected $explorer;
+
+    /**
      * Bootstraps hooks.
      *
      * @since 4.0.0
@@ -76,6 +84,7 @@ class CloudSync_Manager {
         $this->google     = new Connector_GoogleDrive();
         $this->dropbox    = new Connector_Dropbox();
         $this->sharepoint = new Connector_SharePoint();
+        $this->explorer   = new CloudSync_Explorer( $this->google, $this->dropbox, $this->sharepoint );
 
         add_action( 'init', array( $this, 'register_post_types' ) );
         add_action( 'save_post', array( $this, 'maybe_sync_post' ), 20, 2 );
@@ -91,6 +100,8 @@ class CloudSync_Manager {
         add_action( self::CRON_HOOK, array( $this, 'pull_remote_changes' ) );
 
         $this->ensure_cron_schedule();
+
+        $this->explorer->init();
     }
 
     /**
@@ -341,6 +352,15 @@ class CloudSync_Manager {
 
         add_submenu_page(
             'cloudsync-dashboard',
+            __( 'Explorador de archivos', 'secure-pdf-viewer' ),
+            __( 'Explorador de archivos', 'secure-pdf-viewer' ),
+            'manage_options',
+            'cloudsync-dashboard-explorer',
+            array( $this, 'render_dashboard_page' )
+        );
+
+        add_submenu_page(
+            'cloudsync-dashboard',
             __( 'Herramientas avanzadas', 'secure-pdf-viewer' ),
             __( 'Herramientas avanzadas', 'secure-pdf-viewer' ),
             'manage_options',
@@ -380,6 +400,39 @@ class CloudSync_Manager {
                 'popupHeight' => 700,
             )
         );
+
+        wp_enqueue_style(
+            'cloudsync-explorer',
+            SPV_PLUGIN_URL . 'assets/css/cloudsync-explorer.css',
+            array(),
+            SPV_PLUGIN_VERSION
+        );
+
+        wp_enqueue_script(
+            'cloudsync-explorer',
+            SPV_PLUGIN_URL . 'assets/js/cloudsync-explorer.js',
+            array( 'jquery' ),
+            SPV_PLUGIN_VERSION,
+            true
+        );
+
+        wp_localize_script(
+            'cloudsync-explorer',
+            'cloudsyncExplorerData',
+            array(
+                'restUrl' => rest_url( 'cloudsync/v1/explorer' ),
+                'nonce'   => wp_create_nonce( 'wp_rest' ),
+                'labels'  => array(
+                    'loading' => __( 'Cargando...', 'secure-pdf-viewer' ),
+                    'empty'   => __( 'Esta carpeta está vacía.', 'secure-pdf-viewer' ),
+                    'error'   => __( 'No se pudo cargar la carpeta.', 'secure-pdf-viewer' ),
+                    'copied'  => __( 'Enlace copiado al portapapeles.', 'secure-pdf-viewer' ),
+                    'copy'    => __( 'Copiar enlace', 'secure-pdf-viewer' ),
+                    'open'    => __( 'Abrir en la nube', 'secure-pdf-viewer' ),
+                    'toggle'  => __( 'Alternar carpeta', 'secure-pdf-viewer' ),
+                ),
+            )
+        );
     }
 
     /**
@@ -394,6 +447,7 @@ class CloudSync_Manager {
             'cloudsync-dashboard-oauth'     => 'oauth',
             'cloudsync-dashboard-sync'      => 'sync',
             'cloudsync-dashboard-logs'      => 'logs',
+            'cloudsync-dashboard-explorer'  => 'explorer',
             'cloudsync-dashboard-advanced'  => 'advanced',
         );
 

@@ -50,4 +50,15 @@ interface CloudSync_Connector_Interface {
      * @return bool True on success, false otherwise.
      */
     public function delete_folder( $id );
+
+    /**
+     * Lists the child items for a given folder.
+     *
+     * @since 4.2.0
+     *
+     * @param string|null $parent_id Optional folder identifier; null for the service root.
+     *
+     * @return array<int, array<string, mixed>>|\WP_Error Normalized list of child items or error on failure.
+     */
+    public function list_folder_items( $parent_id = null );
 }

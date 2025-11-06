@@ -202,6 +202,72 @@ class Connector_GoogleDrive implements CloudSync_Connector_Interface {
     }
 
     /**
+     * Lists child items for a Google Drive folder.
+     *
+     * @since 4.2.0
+     *
+     * @param string|null $parent_id Parent folder identifier or null for root.
+     *
+     * @return array<int, array<string, mixed>>|\WP_Error
+     */
+    public function list_folder_items( $parent_id = null ) {
+        $token = $this->get_access_token();
+
+        if ( empty( $token ) ) {
+            return new WP_Error( 'cloudsync_google_missing_token', __( 'Conecta Google Drive para explorar archivos.', 'secure-pdf-viewer' ) );
+        }
+
+        $folder_id = $parent_id ? $parent_id : 'root';
+
+        $params = array(
+            'q'        => sprintf( "'%s' in parents and trashed=false", $folder_id ),
+            'spaces'   => 'drive',
+            'pageSize' => 100,
+            'orderBy'  => 'folder, name',
+            'fields'   => 'files(id,name,mimeType,modifiedTime,size,webViewLink,iconLink)',
+        );
+
+        $response = wp_remote_get(
+            add_query_arg( $params, self::API_BASE . '/files' ),
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . $token,
+                ),
+                'timeout' => 20,
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            cloudsync_add_log( __( 'Google Drive list_folder_items failed', 'secure-pdf-viewer' ), array( 'error' => $response->get_error_message() ) );
+
+            return new WP_Error( 'cloudsync_google_request_failed', __( 'No se pudo recuperar la carpeta de Google Drive.', 'secure-pdf-viewer' ) );
+        }
+
+        $data  = json_decode( wp_remote_retrieve_body( $response ), true );
+        $files = isset( $data['files'] ) && is_array( $data['files'] ) ? $data['files'] : array();
+        $items = array();
+
+        foreach ( $files as $file ) {
+            $is_folder = isset( $file['mimeType'] ) && 'application/vnd.google-apps.folder' === $file['mimeType'];
+
+            $items[] = array(
+                'id'           => isset( $file['id'] ) ? $file['id'] : '',
+                'name'         => isset( $file['name'] ) ? $file['name'] : '',
+                'type'         => $is_folder ? 'folder' : 'file',
+                'modified'     => isset( $file['modifiedTime'] ) ? $file['modifiedTime'] : '',
+                'size'         => isset( $file['size'] ) ? (int) $file['size'] : 0,
+                'service'      => 'google',
+                'web_url'      => isset( $file['webViewLink'] ) ? $file['webViewLink'] : '',
+                'icon'         => isset( $file['iconLink'] ) ? $file['iconLink'] : '',
+                'parent_id'    => $folder_id,
+                'has_children' => $is_folder,
+            );
+        }
+
+        return $items;
+    }
+
+    /**
      * Exchanges the refresh token for an access token.
      *
      * @since 4.0.0

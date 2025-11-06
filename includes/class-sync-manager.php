@@ -92,6 +92,10 @@ class CloudSync_Manager {
         add_action( 'admin_post_cloudsync_rebuild_structure', array( $this, 'handle_rebuild_structure' ) );
         add_action( 'admin_post_cloudsync_toggle_dev_mode', array( $this, 'handle_toggle_dev_mode' ) );
         add_action( 'admin_post_cloudsync_download_logs', array( $this, 'handle_download_logs' ) );
+        add_action( 'admin_post_cloudsync_save_credentials', array( $this, 'handle_save_credentials' ) );
+        add_action( 'admin_post_cloudsync_oauth_connect', array( $this, 'handle_oauth_connect' ) );
+        add_action( 'admin_post_cloudsync_oauth_callback', array( $this, 'handle_oauth_callback' ) );
+        add_action( 'admin_post_cloudsync_revoke_access', array( $this, 'handle_revoke_access' ) );
 
         add_action( self::CRON_HOOK, array( $this, 'pull_remote_changes' ) );
 
@@ -168,6 +172,7 @@ class CloudSync_Manager {
             'dropbox_refresh_token',
             'sharepoint_client_id',
             'sharepoint_secret',
+            'sharepoint_tenant_id',
             'sharepoint_refresh_token',
         );
 
@@ -663,6 +668,411 @@ class CloudSync_Manager {
             update_post_meta( $post_id, $meta_key, $remote_id );
             cloudsync_add_log( __( 'Course created from remote folder', 'secure-pdf-viewer' ), array( 'post_id' => $post_id ) );
         }
+    }
+
+    /**
+     * Handles saving OAuth credentials from the dashboard.
+     *
+     * @since 4.1.1
+     *
+     * @return void
+     */
+    public function handle_save_credentials() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to update credentials.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_oauth_action', 'cloudsync_oauth_nonce' );
+
+        $service = isset( $_POST['service'] ) ? sanitize_key( wp_unslash( $_POST['service'] ) ) : '';
+        $fields  = $this->get_service_fields();
+
+        if ( ! $service || ! isset( $fields[ $service ] ) ) {
+            wp_safe_redirect( add_query_arg( array(
+                'page'            => 'cloudsync-dashboard-oauth',
+                'tab'             => 'oauth',
+                'cloudsync_notice'=> 'invalid-service',
+            ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+
+        $settings = cloudsync_get_settings();
+
+        foreach ( $fields[ $service ] as $field_key ) {
+            $settings[ $field_key ] = isset( $_POST[ $field_key ] ) ? sanitize_text_field( wp_unslash( $_POST[ $field_key ] ) ) : '';
+        }
+
+        cloudsync_save_settings( $settings );
+
+        cloudsync_add_log(
+            sprintf( __( '%s credentials updated from dashboard.', 'secure-pdf-viewer' ), $this->get_service_label( $service ) ),
+            array( 'service' => $service )
+        );
+
+        wp_safe_redirect( add_query_arg( array(
+            'page'             => 'cloudsync-dashboard-oauth',
+            'tab'              => 'oauth',
+            'cloudsync_notice' => 'credentials-saved',
+            'service'          => $service,
+        ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Initiates the OAuth authorisation redirect.
+     *
+     * @since 4.1.1
+     *
+     * @return void
+     */
+    public function handle_oauth_connect() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to connect services.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_oauth_action' );
+
+        $service  = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+        $settings = cloudsync_get_settings();
+
+        $redirect_back = add_query_arg( array(
+            'page'             => 'cloudsync-dashboard-oauth',
+            'tab'              => 'oauth',
+            'cloudsync_notice' => 'missing-credentials',
+            'service'          => $service,
+        ), admin_url( 'admin.php' ) );
+
+        switch ( $service ) {
+            case 'google':
+                if ( empty( $settings['google_client_id'] ) || empty( $settings['google_client_secret'] ) ) {
+                    wp_safe_redirect( $redirect_back );
+                    exit;
+                }
+
+                $state     = wp_create_nonce( 'cloudsync_oauth_state_google' );
+                $auth_url  = add_query_arg(
+                    array(
+                        'client_id'     => $settings['google_client_id'],
+                        'redirect_uri'  => $this->get_oauth_redirect_uri( 'google' ),
+                        'response_type' => 'code',
+                        'scope'         => 'https://www.googleapis.com/auth/drive.file',
+                        'access_type'   => 'offline',
+                        'prompt'        => 'consent',
+                        'state'         => $state,
+                    ),
+                    'https://accounts.google.com/o/oauth2/v2/auth'
+                );
+
+                wp_redirect( $auth_url );
+                exit;
+
+            case 'dropbox':
+                if ( empty( $settings['dropbox_app_key'] ) || empty( $settings['dropbox_app_secret'] ) ) {
+                    wp_safe_redirect( $redirect_back );
+                    exit;
+                }
+
+                $state    = wp_create_nonce( 'cloudsync_oauth_state_dropbox' );
+                $auth_url = add_query_arg(
+                    array(
+                        'client_id'         => $settings['dropbox_app_key'],
+                        'redirect_uri'      => $this->get_oauth_redirect_uri( 'dropbox' ),
+                        'response_type'     => 'code',
+                        'token_access_type' => 'offline',
+                        'state'             => $state,
+                    ),
+                    'https://www.dropbox.com/oauth2/authorize'
+                );
+
+                wp_redirect( $auth_url );
+                exit;
+
+            case 'sharepoint':
+                if ( empty( $settings['sharepoint_client_id'] ) || empty( $settings['sharepoint_secret'] ) ) {
+                    wp_safe_redirect( $redirect_back );
+                    exit;
+                }
+
+                $tenant   = ! empty( $settings['sharepoint_tenant_id'] ) ? $settings['sharepoint_tenant_id'] : 'common';
+                $state    = wp_create_nonce( 'cloudsync_oauth_state_sharepoint' );
+                $auth_url = add_query_arg(
+                    array(
+                        'client_id'     => $settings['sharepoint_client_id'],
+                        'response_type' => 'code',
+                        'redirect_uri'  => $this->get_oauth_redirect_uri( 'sharepoint' ),
+                        'response_mode' => 'query',
+                        'scope'         => 'offline_access Files.ReadWrite.All Sites.ReadWrite.All',
+                        'state'         => $state,
+                    ),
+                    sprintf( 'https://login.microsoftonline.com/%s/oauth2/v2.0/authorize', rawurlencode( $tenant ) )
+                );
+
+                wp_redirect( $auth_url );
+                exit;
+        }
+
+        wp_safe_redirect( add_query_arg( array(
+            'page'             => 'cloudsync-dashboard-oauth',
+            'tab'              => 'oauth',
+            'cloudsync_notice' => 'invalid-service',
+        ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Processes the OAuth callback and stores refresh tokens.
+     *
+     * @since 4.1.1
+     *
+     * @return void
+     */
+    public function handle_oauth_callback() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to complete authorisation.', 'secure-pdf-viewer' ) );
+        }
+
+        $service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+        $code    = isset( $_GET['code'] ) ? sanitize_text_field( wp_unslash( $_GET['code'] ) ) : '';
+        $state   = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
+
+        if ( ! $service || ! $code ) {
+            wp_safe_redirect( add_query_arg( array(
+                'page'             => 'cloudsync-dashboard-oauth',
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'oauth-error',
+            ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+
+        if ( ! $state || ! wp_verify_nonce( $state, 'cloudsync_oauth_state_' . $service ) ) {
+            wp_die( esc_html__( 'Invalid OAuth state. Please try again.', 'secure-pdf-viewer' ) );
+        }
+
+        $settings    = cloudsync_get_settings();
+        $redirect_uri = $this->get_oauth_redirect_uri( $service );
+        $body        = array();
+        $endpoint    = '';
+
+        switch ( $service ) {
+            case 'google':
+                $endpoint = 'https://oauth2.googleapis.com/token';
+                $body     = array(
+                    'code'          => $code,
+                    'client_id'     => $settings['google_client_id'],
+                    'client_secret' => $settings['google_client_secret'],
+                    'redirect_uri'  => $redirect_uri,
+                    'grant_type'    => 'authorization_code',
+                );
+                break;
+
+            case 'dropbox':
+                $endpoint = 'https://api.dropboxapi.com/oauth2/token';
+                $body     = array(
+                    'code'          => $code,
+                    'client_id'     => $settings['dropbox_app_key'],
+                    'client_secret' => $settings['dropbox_app_secret'],
+                    'redirect_uri'  => $redirect_uri,
+                    'grant_type'    => 'authorization_code',
+                );
+                break;
+
+            case 'sharepoint':
+                $tenant   = ! empty( $settings['sharepoint_tenant_id'] ) ? $settings['sharepoint_tenant_id'] : 'common';
+                $endpoint = sprintf( 'https://login.microsoftonline.com/%s/oauth2/v2.0/token', rawurlencode( $tenant ) );
+                $body     = array(
+                    'code'          => $code,
+                    'client_id'     => $settings['sharepoint_client_id'],
+                    'client_secret' => $settings['sharepoint_secret'],
+                    'redirect_uri'  => $redirect_uri,
+                    'grant_type'    => 'authorization_code',
+                    'scope'         => 'offline_access Files.ReadWrite.All Sites.ReadWrite.All',
+                );
+                break;
+
+            default:
+                wp_safe_redirect( add_query_arg( array(
+                    'page'             => 'cloudsync-dashboard-oauth',
+                    'tab'              => 'oauth',
+                    'cloudsync_notice' => 'invalid-service',
+                ), admin_url( 'admin.php' ) ) );
+                exit;
+        }
+
+        $response = wp_remote_post( $endpoint, array( 'body' => $body ) );
+
+        if ( is_wp_error( $response ) ) {
+            cloudsync_add_log( __( 'OAuth token exchange failed.', 'secure-pdf-viewer' ), array( 'service' => $service, 'error' => $response->get_error_message() ) );
+            wp_safe_redirect( add_query_arg( array(
+                'page'             => 'cloudsync-dashboard-oauth',
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'oauth-error',
+                'service'          => $service,
+            ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+
+        $data = json_decode( wp_remote_retrieve_body( $response ), true );
+
+        if ( empty( $data ) || ! is_array( $data ) ) {
+            cloudsync_add_log( __( 'OAuth token exchange returned an empty response.', 'secure-pdf-viewer' ), array( 'service' => $service ) );
+            wp_safe_redirect( add_query_arg( array(
+                'page'             => 'cloudsync-dashboard-oauth',
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'oauth-error',
+                'service'          => $service,
+            ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+
+        $fields = $this->get_service_fields();
+        $token_key = end( $fields[ $service ] );
+
+        if ( ! empty( $data['refresh_token'] ) ) {
+            $settings[ $token_key ] = sanitize_text_field( $data['refresh_token'] );
+        }
+
+        cloudsync_save_settings( $settings );
+
+        cloudsync_add_log(
+            sprintf( __( '%s connected via OAuth.', 'secure-pdf-viewer' ), $this->get_service_label( $service ) ),
+            array( 'service' => $service )
+        );
+
+        wp_safe_redirect( add_query_arg( array(
+            'page'             => 'cloudsync-dashboard-oauth',
+            'tab'              => 'oauth',
+            'cloudsync_notice' => 'connected',
+            'service'          => $service,
+        ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Revokes stored credentials for a service.
+     *
+     * @since 4.1.1
+     *
+     * @return void
+     */
+    public function handle_revoke_access() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to revoke access.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_oauth_action' );
+
+        $service  = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+        $settings = cloudsync_get_settings();
+
+        $fields = $this->get_service_fields();
+
+        if ( ! isset( $fields[ $service ] ) ) {
+            wp_safe_redirect( add_query_arg( array(
+                'page'             => 'cloudsync-dashboard-oauth',
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'invalid-service',
+            ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
+
+        $token_field = end( $fields[ $service ] );
+        $token       = isset( $settings[ $token_field ] ) ? $settings[ $token_field ] : '';
+
+        switch ( $service ) {
+            case 'google':
+                if ( $token ) {
+                    wp_remote_post( 'https://oauth2.googleapis.com/revoke', array( 'body' => array( 'token' => $token ) ) );
+                }
+                break;
+
+            case 'dropbox':
+                if ( $token && ! empty( $settings['dropbox_app_key'] ) && ! empty( $settings['dropbox_app_secret'] ) ) {
+                    wp_remote_post(
+                        'https://api.dropboxapi.com/2/oauth2/token/revoke',
+                        array(
+                            'body'    => array( 'token' => $token ),
+                            'headers' => array(
+                                'Authorization' => 'Basic ' . base64_encode( $settings['dropbox_app_key'] . ':' . $settings['dropbox_app_secret'] ),
+                            ),
+                        )
+                    );
+                }
+                break;
+
+            case 'sharepoint':
+                // Microsoft Graph does not provide a direct refresh token revoke endpoint for app tokens.
+                break;
+        }
+
+        $settings[ $token_field ] = '';
+
+        cloudsync_save_settings( $settings );
+
+        cloudsync_add_log(
+            sprintf( __( '%s access revoked from dashboard.', 'secure-pdf-viewer' ), $this->get_service_label( $service ) ),
+            array( 'service' => $service )
+        );
+
+        wp_safe_redirect( add_query_arg( array(
+            'page'             => 'cloudsync-dashboard-oauth',
+            'tab'              => 'oauth',
+            'cloudsync_notice' => 'revoked',
+            'service'          => $service,
+        ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Returns the fields configured for each OAuth service.
+     *
+     * @since 4.1.1
+     *
+     * @return array<string, array<int, string>>
+     */
+    protected function get_service_fields() {
+        return array(
+            'google'     => array( 'google_client_id', 'google_client_secret', 'google_refresh_token' ),
+            'dropbox'    => array( 'dropbox_app_key', 'dropbox_app_secret', 'dropbox_refresh_token' ),
+            'sharepoint' => array( 'sharepoint_client_id', 'sharepoint_secret', 'sharepoint_tenant_id', 'sharepoint_refresh_token' ),
+        );
+    }
+
+    /**
+     * Builds the callback URL for a given service.
+     *
+     * @since 4.1.1
+     *
+     * @param string $service Service slug.
+     *
+     * @return string
+     */
+    protected function get_oauth_redirect_uri( $service ) {
+        return add_query_arg(
+            array(
+                'action'  => 'cloudsync_oauth_callback',
+                'service' => $service,
+            ),
+            admin_url( 'admin-post.php' )
+        );
+    }
+
+    /**
+     * Provides a human-friendly label for services.
+     *
+     * @since 4.1.1
+     *
+     * @param string $service Service slug.
+     *
+     * @return string
+     */
+    protected function get_service_label( $service ) {
+        $labels = array(
+            'google'     => __( 'Google Drive', 'secure-pdf-viewer' ),
+            'dropbox'    => __( 'Dropbox', 'secure-pdf-viewer' ),
+            'sharepoint' => __( 'SharePoint', 'secure-pdf-viewer' ),
+        );
+
+        return isset( $labels[ $service ] ) ? $labels[ $service ] : ucfirst( $service );
     }
 
     /**

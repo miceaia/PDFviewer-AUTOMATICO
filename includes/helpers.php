@@ -26,6 +26,7 @@ function cloudsync_get_settings() {
         'dropbox_refresh_token'=> '',
         'sharepoint_client_id' => '',
         'sharepoint_secret'    => '',
+        'sharepoint_tenant_id' => '',
         'sharepoint_refresh_token' => '',
     );
 

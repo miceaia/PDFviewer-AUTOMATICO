@@ -228,6 +228,87 @@ class Connector_Dropbox implements CloudSync_Connector_Interface {
     }
 
     /**
+     * Lists child items for a Dropbox folder.
+     *
+     * @since 4.2.0
+     *
+     * @param string|null $parent_id Folder path (lowercase) or null for root.
+     *
+     * @return array<int, array<string, mixed>>|\WP_Error
+     */
+    public function list_folder_items( $parent_id = null ) {
+        $token = $this->get_access_token();
+
+        if ( empty( $token ) ) {
+            return new WP_Error( 'cloudsync_dropbox_missing_token', __( 'Conecta Dropbox para explorar archivos.', 'secure-pdf-viewer' ) );
+        }
+
+        $path = $parent_id ? $parent_id : '';
+
+        $response = wp_remote_post(
+            'https://api.dropboxapi.com/2/files/list_folder',
+            array(
+                'headers' => array(
+                    'Authorization' => 'Bearer ' . $token,
+                    'Content-Type'  => 'application/json',
+                ),
+                'body'    => wp_json_encode(
+                    array(
+                        'path'                 => $path,
+                        'recursive'            => false,
+                        'include_media_info'   => false,
+                        'limit'                => 2000,
+                        'include_deleted'      => false,
+                        'include_non_downloadable_files' => true,
+                    )
+                ),
+                'timeout' => 20,
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            cloudsync_add_log(
+                __( 'Dropbox list_folder_items failed', 'secure-pdf-viewer' ),
+                array( 'error' => $response->get_error_message() )
+            );
+
+            return new WP_Error( 'cloudsync_dropbox_request_failed', __( 'No se pudo recuperar la carpeta de Dropbox.', 'secure-pdf-viewer' ) );
+        }
+
+        $data    = json_decode( wp_remote_retrieve_body( $response ), true );
+        $entries = isset( $data['entries'] ) && is_array( $data['entries'] ) ? $data['entries'] : array();
+        $items   = array();
+
+        foreach ( $entries as $entry ) {
+            $tag       = isset( $entry['.tag'] ) ? $entry['.tag'] : 'file';
+            $is_folder = 'folder' === $tag;
+            $path_lower = isset( $entry['path_lower'] ) ? $entry['path_lower'] : '';
+            $path_display = isset( $entry['path_display'] ) ? $entry['path_display'] : $path_lower;
+            $encoded_path = '';
+
+            if ( ! empty( $path_display ) ) {
+                $segments     = array_map( 'rawurlencode', array_filter( explode( '/', ltrim( $path_display, '/' ) ), 'strlen' ) );
+                $encoded_path = implode( '/', $segments );
+            }
+
+            $items[] = array(
+                'id'           => $path_lower,
+                'name'         => isset( $entry['name'] ) ? $entry['name'] : basename( $path_display ),
+                'type'         => $is_folder ? 'folder' : 'file',
+                'modified'     => isset( $entry['server_modified'] ) ? $entry['server_modified'] : '',
+                'size'         => isset( $entry['size'] ) ? (int) $entry['size'] : 0,
+                'service'      => 'dropbox',
+                'web_url'      => $is_folder ? 'https://www.dropbox.com/home/' . $encoded_path : 'https://www.dropbox.com/preview/' . $encoded_path,
+                'icon'         => 'dropbox',
+                'parent_id'    => $path,
+                'has_children' => $is_folder,
+            );
+        }
+
+        return $items;
+    }
+
+    /**
      * Exchanges the refresh token for an access token.
      *
      * @since 4.0.0

@@ -87,4 +87,22 @@ class Connector_SharePoint implements CloudSync_Connector_Interface {
         cloudsync_add_log( __( 'SharePoint delete not yet implemented', 'secure-pdf-viewer' ) );
         return false;
     }
+
+    /**
+     * Lists SharePoint folder items.
+     *
+     * @since 4.2.0
+     *
+     * @param string|null $parent_id Parent identifier (unused until implemented).
+     *
+     * @return \WP_Error Always returns a stub error until implemented.
+     */
+    public function list_folder_items( $parent_id = null ) {
+        unset( $parent_id );
+
+        return new WP_Error(
+            'cloudsync_sharepoint_unimplemented',
+            __( 'El explorador de SharePoint aún no está disponible.', 'secure-pdf-viewer' )
+        );
+    }
 }

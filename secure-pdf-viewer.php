@@ -27,6 +27,7 @@ require_once SPV_PLUGIN_PATH . 'includes/class-shortcode-handler.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-gutenberg-block.php';
 require_once SPV_PLUGIN_PATH . 'includes/helpers.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-sync-manager.php';
+require_once SPV_PLUGIN_PATH . 'includes/admin-handlers.php';
 
 class SecurePDFViewer {
     
@@ -41,6 +42,17 @@ class SecurePDFViewer {
      * @var CloudSync_Manager
      */
     private $cloudsync_manager;
+
+    /**
+     * Returns the CloudSync manager instance.
+     *
+     * @since 4.1.2
+     *
+     * @return CloudSync_Manager
+     */
+    public function get_cloudsync_manager() {
+        return $this->cloudsync_manager;
+    }
     
     public static function get_instance() {
         if (null === self::$instance) {

@@ -14,6 +14,7 @@ require_once __DIR__ . '/interface-cloudsync-connector.php';
 require_once __DIR__ . '/class-connector-googledrive.php';
 require_once __DIR__ . '/class-connector-dropbox.php';
 require_once __DIR__ . '/class-connector-sharepoint.php';
+require_once __DIR__ . '/class-explorer.php';
 
 /**
  * Coordinates synchronization between WordPress and cloud services.
@@ -68,6 +69,13 @@ class CloudSync_Manager {
     protected $sharepoint;
 
     /**
+     * Explorer REST helper.
+     *
+     * @var CloudSync_Explorer
+     */
+    protected $explorer;
+
+    /**
      * Bootstraps hooks.
      *
      * @since 4.0.0
@@ -76,6 +84,7 @@ class CloudSync_Manager {
         $this->google     = new Connector_GoogleDrive();
         $this->dropbox    = new Connector_Dropbox();
         $this->sharepoint = new Connector_SharePoint();
+        $this->explorer   = new CloudSync_Explorer( $this->google, $this->dropbox, $this->sharepoint );
 
         add_action( 'init', array( $this, 'register_post_types' ) );
         add_action( 'save_post', array( $this, 'maybe_sync_post' ), 20, 2 );
@@ -86,20 +95,13 @@ class CloudSync_Manager {
 
         add_filter( 'cron_schedules', array( $this, 'register_custom_schedules' ) );
 
-        add_action( 'admin_post_cloudsync_manual_sync', array( $this, 'handle_manual_sync' ) );
-        add_action( 'admin_post_cloudsync_cleanup_meta', array( $this, 'handle_cleanup_meta' ) );
-        add_action( 'admin_post_cloudsync_reset_tokens', array( $this, 'handle_reset_tokens' ) );
-        add_action( 'admin_post_cloudsync_rebuild_structure', array( $this, 'handle_rebuild_structure' ) );
-        add_action( 'admin_post_cloudsync_toggle_dev_mode', array( $this, 'handle_toggle_dev_mode' ) );
-        add_action( 'admin_post_cloudsync_download_logs', array( $this, 'handle_download_logs' ) );
-        add_action( 'admin_post_cloudsync_save_credentials', array( $this, 'handle_save_credentials' ) );
-        add_action( 'admin_post_cloudsync_oauth_connect', array( $this, 'handle_oauth_connect' ) );
-        add_action( 'admin_post_cloudsync_oauth_callback', array( $this, 'handle_oauth_callback' ) );
-        add_action( 'admin_post_cloudsync_revoke_access', array( $this, 'handle_revoke_access' ) );
+        add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
 
         add_action( self::CRON_HOOK, array( $this, 'pull_remote_changes' ) );
 
         $this->ensure_cron_schedule();
+
+        $this->explorer->init();
     }
 
     /**
@@ -350,11 +352,86 @@ class CloudSync_Manager {
 
         add_submenu_page(
             'cloudsync-dashboard',
+            __( 'Explorador de archivos', 'secure-pdf-viewer' ),
+            __( 'Explorador de archivos', 'secure-pdf-viewer' ),
+            'manage_options',
+            'cloudsync-dashboard-explorer',
+            array( $this, 'render_dashboard_page' )
+        );
+
+        add_submenu_page(
+            'cloudsync-dashboard',
             __( 'Herramientas avanzadas', 'secure-pdf-viewer' ),
             __( 'Herramientas avanzadas', 'secure-pdf-viewer' ),
             'manage_options',
             'cloudsync-dashboard-advanced',
             array( $this, 'render_dashboard_page' )
+        );
+    }
+
+    /**
+     * Enqueues assets for the CloudSync dashboard experience.
+     *
+     * @since 4.1.2
+     *
+     * @param string $hook Current admin page hook suffix.
+     *
+     * @return void
+     */
+    public function enqueue_admin_assets( $hook ) {
+        if ( false === strpos( $hook, 'cloudsync-dashboard' ) ) {
+            return;
+        }
+
+        wp_enqueue_script(
+            'cloudsync-oauth',
+            SPV_PLUGIN_URL . 'assets/js/cloudsync-oauth.js',
+            array(),
+            SPV_PLUGIN_VERSION,
+            true
+        );
+
+        wp_localize_script(
+            'cloudsync-oauth',
+            'cloudsyncOAuthData',
+            array(
+                'popupName'   => 'cloudsync-oauth-popup',
+                'popupWidth'  => 600,
+                'popupHeight' => 700,
+            )
+        );
+
+        wp_enqueue_style(
+            'cloudsync-explorer',
+            SPV_PLUGIN_URL . 'assets/css/cloudsync-explorer.css',
+            array(),
+            SPV_PLUGIN_VERSION
+        );
+
+        wp_enqueue_script(
+            'cloudsync-explorer',
+            SPV_PLUGIN_URL . 'assets/js/cloudsync-explorer.js',
+            array( 'jquery' ),
+            SPV_PLUGIN_VERSION,
+            true
+        );
+
+        wp_localize_script(
+            'cloudsync-explorer',
+            'cloudsyncExplorerData',
+            array(
+                'restUrl' => rest_url( 'cloudsync/v1/explorer' ),
+                'nonce'   => wp_create_nonce( 'wp_rest' ),
+                'labels'  => array(
+                    'loading' => __( 'Cargando...', 'secure-pdf-viewer' ),
+                    'empty'   => __( 'Esta carpeta está vacía.', 'secure-pdf-viewer' ),
+                    'error'   => __( 'No se pudo cargar la carpeta.', 'secure-pdf-viewer' ),
+                    'copied'  => __( 'Enlace copiado al portapapeles.', 'secure-pdf-viewer' ),
+                    'copy'    => __( 'Copiar enlace', 'secure-pdf-viewer' ),
+                    'open'    => __( 'Abrir en la nube', 'secure-pdf-viewer' ),
+                    'toggle'  => __( 'Alternar carpeta', 'secure-pdf-viewer' ),
+                ),
+            )
         );
     }
 
@@ -370,6 +447,7 @@ class CloudSync_Manager {
             'cloudsync-dashboard-oauth'     => 'oauth',
             'cloudsync-dashboard-sync'      => 'sync',
             'cloudsync-dashboard-logs'      => 'logs',
+            'cloudsync-dashboard-explorer'  => 'explorer',
             'cloudsync-dashboard-advanced'  => 'advanced',
         );
 
@@ -684,10 +762,10 @@ class CloudSync_Manager {
 
         check_admin_referer( 'cloudsync_oauth_action', 'cloudsync_oauth_nonce' );
 
-        $service = isset( $_POST['service'] ) ? sanitize_key( wp_unslash( $_POST['service'] ) ) : '';
-        $fields  = $this->get_service_fields();
+        $service     = isset( $_POST['service'] ) ? sanitize_key( wp_unslash( $_POST['service'] ) ) : '';
+        $definitions = cloudsync_get_service_definitions();
 
-        if ( ! $service || ! isset( $fields[ $service ] ) ) {
+        if ( ! $service || ! isset( $definitions[ $service ] ) ) {
             wp_safe_redirect( add_query_arg( array(
                 'page'            => 'cloudsync-dashboard-oauth',
                 'tab'             => 'oauth',
@@ -698,8 +776,15 @@ class CloudSync_Manager {
 
         $settings = cloudsync_get_settings();
 
-        foreach ( $fields[ $service ] as $field_key ) {
-            $settings[ $field_key ] = isset( $_POST[ $field_key ] ) ? sanitize_text_field( wp_unslash( $_POST[ $field_key ] ) ) : '';
+        foreach ( $definitions[ $service ]['fields'] as $field_key => $field_config ) {
+            $value         = isset( $_POST[ $field_key ] ) ? sanitize_text_field( wp_unslash( $_POST[ $field_key ] ) ) : '';
+            $keep_existing = isset( $_POST[ $field_key . '_keep' ] ) && '1' === $_POST[ $field_key . '_keep' ];
+
+            if ( '' === $value && $keep_existing && isset( $settings[ $field_key ] ) ) {
+                continue;
+            }
+
+            $settings[ $field_key ] = $value;
         }
 
         cloudsync_save_settings( $settings );
@@ -735,6 +820,8 @@ class CloudSync_Manager {
         $service  = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
         $settings = cloudsync_get_settings();
 
+        add_filter( 'allowed_redirect_hosts', array( $this, 'allow_oauth_hosts' ) );
+
         $redirect_back = add_query_arg( array(
             'page'             => 'cloudsync-dashboard-oauth',
             'tab'              => 'oauth',
@@ -763,7 +850,7 @@ class CloudSync_Manager {
                     'https://accounts.google.com/o/oauth2/v2/auth'
                 );
 
-                wp_redirect( $auth_url );
+                wp_safe_redirect( $auth_url );
                 exit;
 
             case 'dropbox':
@@ -784,7 +871,7 @@ class CloudSync_Manager {
                     'https://www.dropbox.com/oauth2/authorize'
                 );
 
-                wp_redirect( $auth_url );
+                wp_safe_redirect( $auth_url );
                 exit;
 
             case 'sharepoint':
@@ -807,7 +894,7 @@ class CloudSync_Manager {
                     sprintf( 'https://login.microsoftonline.com/%s/oauth2/v2.0/authorize', rawurlencode( $tenant ) )
                 );
 
-                wp_redirect( $auth_url );
+                wp_safe_redirect( $auth_url );
                 exit;
         }
 
@@ -848,10 +935,20 @@ class CloudSync_Manager {
             wp_die( esc_html__( 'Invalid OAuth state. Please try again.', 'secure-pdf-viewer' ) );
         }
 
-        $settings    = cloudsync_get_settings();
+        $settings     = cloudsync_get_settings();
+        $definitions  = cloudsync_get_service_definitions();
         $redirect_uri = $this->get_oauth_redirect_uri( $service );
-        $body        = array();
-        $endpoint    = '';
+        $body         = array();
+        $endpoint     = '';
+
+        if ( ! isset( $definitions[ $service ] ) ) {
+            wp_safe_redirect( add_query_arg( array(
+                'page'             => 'cloudsync-dashboard-oauth',
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'invalid-service',
+            ), admin_url( 'admin.php' ) ) );
+            exit;
+        }
 
         switch ( $service ) {
             case 'google':
@@ -924,8 +1021,7 @@ class CloudSync_Manager {
             exit;
         }
 
-        $fields = $this->get_service_fields();
-        $token_key = end( $fields[ $service ] );
+        $token_key = $definitions[ $service ]['token_field'];
 
         if ( ! empty( $data['refresh_token'] ) ) {
             $settings[ $token_key ] = sanitize_text_field( $data['refresh_token'] );
@@ -943,6 +1039,7 @@ class CloudSync_Manager {
             'tab'              => 'oauth',
             'cloudsync_notice' => 'connected',
             'service'          => $service,
+            'cloudsync_popup'  => '1',
         ), admin_url( 'admin.php' ) ) );
         exit;
     }
@@ -962,11 +1059,10 @@ class CloudSync_Manager {
         check_admin_referer( 'cloudsync_oauth_action' );
 
         $service  = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
-        $settings = cloudsync_get_settings();
+        $settings    = cloudsync_get_settings();
+        $definitions = cloudsync_get_service_definitions();
 
-        $fields = $this->get_service_fields();
-
-        if ( ! isset( $fields[ $service ] ) ) {
+        if ( ! isset( $definitions[ $service ] ) ) {
             wp_safe_redirect( add_query_arg( array(
                 'page'             => 'cloudsync-dashboard-oauth',
                 'tab'              => 'oauth',
@@ -975,7 +1071,7 @@ class CloudSync_Manager {
             exit;
         }
 
-        $token_field = end( $fields[ $service ] );
+        $token_field = $definitions[ $service ]['token_field'];
         $token       = isset( $settings[ $token_field ] ) ? $settings[ $token_field ] : '';
 
         switch ( $service ) {
@@ -1023,21 +1119,6 @@ class CloudSync_Manager {
     }
 
     /**
-     * Returns the fields configured for each OAuth service.
-     *
-     * @since 4.1.1
-     *
-     * @return array<string, array<int, string>>
-     */
-    protected function get_service_fields() {
-        return array(
-            'google'     => array( 'google_client_id', 'google_client_secret', 'google_refresh_token' ),
-            'dropbox'    => array( 'dropbox_app_key', 'dropbox_app_secret', 'dropbox_refresh_token' ),
-            'sharepoint' => array( 'sharepoint_client_id', 'sharepoint_secret', 'sharepoint_tenant_id', 'sharepoint_refresh_token' ),
-        );
-    }
-
-    /**
      * Builds the callback URL for a given service.
      *
      * @since 4.1.1
@@ -1047,13 +1128,7 @@ class CloudSync_Manager {
      * @return string
      */
     protected function get_oauth_redirect_uri( $service ) {
-        return add_query_arg(
-            array(
-                'action'  => 'cloudsync_oauth_callback',
-                'service' => $service,
-            ),
-            admin_url( 'admin-post.php' )
-        );
+        return cloudsync_get_oauth_redirect_uri( $service );
     }
 
     /**
@@ -1076,6 +1151,25 @@ class CloudSync_Manager {
     }
 
     /**
+     * Allows external OAuth hosts during wp_safe_redirect usage.
+     *
+     * @since 4.1.2
+     *
+     * @param array<int, string> $hosts Existing hosts.
+     *
+     * @return array<int, string>
+     */
+    public function allow_oauth_hosts( $hosts ) {
+        $oauth_hosts = array(
+            'accounts.google.com',
+            'www.dropbox.com',
+            'login.microsoftonline.com',
+        );
+
+        return array_unique( array_merge( $hosts, $oauth_hosts ) );
+    }
+
+    /**
      * Handles manual synchronization from the dashboard.
      *
      * @since 4.1.0
@@ -1094,6 +1188,28 @@ class CloudSync_Manager {
         cloudsync_add_log( __( 'Manual synchronisation executed from dashboard.', 'secure-pdf-viewer' ) );
 
         wp_safe_redirect( add_query_arg( array( 'page' => 'cloudsync-dashboard-sync', 'cloudsync_notice' => 'manual-sync' ), admin_url( 'admin.php' ) ) );
+        exit;
+    }
+
+    /**
+     * Forces an immediate sync from the advanced tools tab.
+     *
+     * @since 4.1.2
+     */
+    public function handle_force_sync() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to force synchronisation.', 'secure-pdf-viewer' ) );
+        }
+
+        check_admin_referer( 'cloudsync_force_sync' );
+
+        $this->pull_remote_changes();
+        $this->sync_all_posts();
+
+        update_option( 'cloudsync_last_sync', current_time( 'timestamp' ) );
+        cloudsync_add_log( __( 'Force synchronisation executed from advanced tools.', 'secure-pdf-viewer' ) );
+
+        wp_safe_redirect( add_query_arg( array( 'page' => 'cloudsync-dashboard-advanced', 'cloudsync_notice' => 'force-sync' ), admin_url( 'admin.php' ) ) );
         exit;
     }
 

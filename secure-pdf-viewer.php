@@ -25,6 +25,8 @@ define('SPV_PLUGIN_VERSION', '3.1.0');
 require_once SPV_PLUGIN_PATH . 'includes/class-pdf-viewer.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-shortcode-handler.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-gutenberg-block.php';
+require_once SPV_PLUGIN_PATH . 'includes/helpers.php';
+require_once SPV_PLUGIN_PATH . 'includes/class-sync-manager.php';
 
 class SecurePDFViewer {
     
@@ -32,6 +34,13 @@ class SecurePDFViewer {
     private $pdf_viewer;
     private $shortcode_handler;
     private $gutenberg_block;
+
+    /**
+     * Administrador de sincronización en la nube.
+     *
+     * @var CloudSync_Manager
+     */
+    private $cloudsync_manager;
     
     public static function get_instance() {
         if (null === self::$instance) {
@@ -60,13 +69,15 @@ class SecurePDFViewer {
     }
     
     public function init_classes() {
-        $this->pdf_viewer = new SPV_PDF_Viewer();
+        $this->pdf_viewer        = new SPV_PDF_Viewer();
         $this->shortcode_handler = new SPV_Shortcode_Handler();
-        $this->gutenberg_block = new SPV_Gutenberg_Block();
-        
+        $this->gutenberg_block   = new SPV_Gutenberg_Block();
+        $this->cloudsync_manager = new CloudSync_Manager();
+
         $this->pdf_viewer->init();
         $this->shortcode_handler->init();
         $this->gutenberg_block->init();
+        $this->cloudsync_manager->init();
     }
     
     public function register_assets() {
@@ -134,6 +145,12 @@ class SecurePDFViewer {
     }
     
     public function deactivate() {
+        $timestamp = wp_next_scheduled( CloudSync_Manager::CRON_HOOK );
+
+        if ( $timestamp ) {
+            wp_unschedule_event( $timestamp, CloudSync_Manager::CRON_HOOK );
+        }
+
         flush_rewrite_rules();
     }
 }

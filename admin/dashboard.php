@@ -75,7 +75,14 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
         <div class="wrap cloudsync-dashboard">
             <h1>☁️ <?php esc_html_e( 'CloudSync LMS Dashboard', 'secure-pdf-viewer' ); ?></h1>
 
-            <?php if ( ! empty( $notice ) ) : ?>
+            <?php
+            $settings_updated = isset( $_GET['settings-updated'] ) ? sanitize_text_field( wp_unslash( $_GET['settings-updated'] ) ) : '';
+            if ( $settings_updated && empty( $notice ) ) :
+                ?>
+                <div class="notice notice-success is-dismissible">
+                    <p>✅ <?php esc_html_e( 'Cambios guardados correctamente.', 'secure-pdf-viewer' ); ?></p>
+                </div>
+            <?php elseif ( ! empty( $notice ) ) : ?>
                 <?php
                 $error_notices = array( 'oauth-error', 'invalid-service', 'missing-credentials' );
                 $notice_class  = in_array( $notice, $error_notices, true ) ? 'notice notice-error is-dismissible' : 'notice notice-success is-dismissible';
@@ -144,8 +151,9 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
             </h2>
 
             <?php if ( 'general' === $active_tab ) : ?>
-                <form method="post" action="options.php" class="cloudsync-card">
-                    <?php settings_fields( 'cloudsync_general' ); ?>
+                <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-card">
+                    <?php wp_nonce_field( 'cloudsync_save_config', 'cloudsync_nonce' ); ?>
+                    <input type="hidden" name="action" value="cloudsync_save_config" />
                     <input type="hidden" name="cloudsync_general_settings[developer_mode]" value="<?php echo (int) $general_settings['developer_mode']; ?>" />
                     <h2><?php esc_html_e( 'Configuración general', 'secure-pdf-viewer' ); ?></h2>
                     <p class="description"><?php esc_html_e( 'Controla la frecuencia y comportamiento de la sincronización automática.', 'secure-pdf-viewer' ); ?></p>
@@ -554,8 +562,8 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                         <h3><?php esc_html_e( 'Modo desarrollador', 'secure-pdf-viewer' ); ?></h3>
                         <p><?php esc_html_e( 'Activa información adicional sobre hooks y endpoints disponibles.', 'secure-pdf-viewer' ); ?></p>
                         <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-developer-form">
-                            <?php wp_nonce_field( 'cloudsync_toggle_dev_mode' ); ?>
-                            <input type="hidden" name="action" value="cloudsync_toggle_dev_mode" />
+                            <?php wp_nonce_field( 'cloudsync_save_advanced', 'cloudsync_advanced_nonce' ); ?>
+                            <input type="hidden" name="action" value="cloudsync_save_advanced" />
                             <label>
                                 <input type="checkbox" name="developer_mode" value="1" <?php checked( (int) $general_settings['developer_mode'], 1 ); ?> />
                                 <?php esc_html_e( 'Mostrar herramientas para desarrolladores', 'secure-pdf-viewer' ); ?>

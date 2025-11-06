@@ -5,6 +5,9 @@
         popupHeight: 700,
     };
 
+    let activeGuide = null;
+    let lastGuideTrigger = null;
+
     function handleConnectClick(event) {
         const trigger = event.currentTarget;
         const url = trigger.getAttribute('data-oauth-url');
@@ -31,6 +34,99 @@
 
         buttons.forEach((button) => {
             button.addEventListener('click', handleConnectClick);
+        });
+    }
+
+    function closeGuideModal() {
+        const backdrop = document.querySelector('[data-cloudsync-guide-backdrop]');
+
+        if (activeGuide) {
+            activeGuide.setAttribute('aria-hidden', 'true');
+            activeGuide.setAttribute('hidden', 'hidden');
+            activeGuide = null;
+        }
+
+        if (backdrop) {
+            backdrop.setAttribute('hidden', 'hidden');
+        }
+
+        document.body.classList.remove('cloudsync-guide-open');
+
+        if (lastGuideTrigger && typeof lastGuideTrigger.focus === 'function') {
+            lastGuideTrigger.focus();
+        }
+
+        lastGuideTrigger = null;
+    }
+
+    function openGuideModal(modal, trigger) {
+        const backdrop = document.querySelector('[data-cloudsync-guide-backdrop]');
+
+        if (!modal) {
+            return;
+        }
+
+        modal.removeAttribute('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+
+        if (backdrop) {
+            backdrop.removeAttribute('hidden');
+        }
+
+        document.body.classList.add('cloudsync-guide-open');
+        activeGuide = modal;
+        lastGuideTrigger = trigger || null;
+
+        try {
+            modal.focus();
+        } catch (error) {
+            // Ignore focus errors in legacy browsers.
+        }
+    }
+
+    function handleGuideClick(event) {
+        const trigger = event.currentTarget;
+        const service = trigger.getAttribute('data-service');
+
+        if (!service) {
+            return;
+        }
+
+        event.preventDefault();
+
+        const modal = document.getElementById(`cloudsync-guide-${service}`);
+
+        if (!modal) {
+            return;
+        }
+
+        openGuideModal(modal, trigger);
+    }
+
+    function bindGuideButtons() {
+        const guideButtons = document.querySelectorAll('.js-cloudsync-guide');
+
+        guideButtons.forEach((button) => {
+            button.addEventListener('click', handleGuideClick);
+        });
+    }
+
+    function bindGuideClosers() {
+        const closeButtons = document.querySelectorAll('.cloudsync-guide-modal__close');
+        const backdrop = document.querySelector('[data-cloudsync-guide-backdrop]');
+
+        closeButtons.forEach((button) => {
+            button.addEventListener('click', closeGuideModal);
+        });
+
+        if (backdrop) {
+            backdrop.addEventListener('click', closeGuideModal);
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeGuideModal();
+            }
         });
     }
 
@@ -62,6 +158,8 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         bindConnectButtons();
+        bindGuideButtons();
+        bindGuideClosers();
         listenForCompletion();
         notifyParentIfPopup();
     });

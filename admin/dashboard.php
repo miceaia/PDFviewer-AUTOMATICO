@@ -36,7 +36,8 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
         $general_settings    = cloudsync_get_general_settings();
         $oauth_settings      = cloudsync_get_settings();
         $logs                = cloudsync_get_logs();
-        $service_definitions = cloudsync_get_service_definitions();
+        $service_definitions  = cloudsync_get_service_definitions();
+        $connection_guides    = cloudsync_get_connection_guides();
         $notice           = isset( $_GET['cloudsync_notice'] ) ? sanitize_key( wp_unslash( $_GET['cloudsync_notice'] ) ) : '';
 
         $last_sync = (int) get_option( 'cloudsync_last_sync', 0 );
@@ -284,8 +285,14 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                                     <?php endforeach; ?>
                                 </div>
                                 <div class="cloudsync-actions">
-                                    <?php if ( ! empty( $definition['guide'] ) ) : ?>
-                                        <a class="button button-link" href="<?php echo esc_url( $definition['guide'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></a>
+                                    <?php
+                                    $guide_config = isset( $definition['guide'] ) ? $definition['guide'] : '';
+                                    if ( is_array( $guide_config ) && isset( $guide_config['type'] ) && 'internal' === $guide_config['type'] ) :
+                                        $guide_slug = isset( $guide_config['slug'] ) ? $guide_config['slug'] : $service;
+                                        ?>
+                                        <button type="button" class="button button-link js-cloudsync-guide" data-service="<?php echo esc_attr( $guide_slug ); ?>"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
+                                    <?php elseif ( ! empty( $guide_config ) ) : ?>
+                                        <a class="button button-link" href="<?php echo esc_url( $guide_config ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></a>
                                     <?php endif; ?>
                                     <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
                                     <button type="button" class="button button-secondary js-cloudsync-connect" data-oauth-url="<?php echo esc_url( $connect_url ); ?>" data-service="<?php echo esc_attr( $service ); ?>" <?php disabled( ! $requirements_met ); ?>><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
@@ -299,6 +306,38 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                         <?php endforeach; ?>
                     </div>
                 </div>
+                <?php if ( ! empty( $connection_guides ) ) : ?>
+                    <div class="cloudsync-guide-container" aria-hidden="true">
+                        <div class="cloudsync-guide-modal__backdrop" data-cloudsync-guide-backdrop hidden></div>
+                        <?php foreach ( $connection_guides as $guide_service => $guide ) :
+                            $modal_id = 'cloudsync-guide-' . $guide_service;
+                            $title_id = $modal_id . '-title';
+                            ?>
+                            <div id="<?php echo esc_attr( $modal_id ); ?>" class="cloudsync-guide-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="<?php echo esc_attr( $title_id ); ?>" hidden tabindex="-1">
+                                <div class="cloudsync-guide-modal__content">
+                                    <button type="button" class="cloudsync-guide-modal__close" aria-label="<?php esc_attr_e( 'Cerrar guía', 'secure-pdf-viewer' ); ?>">&times;</button>
+                                    <h2 id="<?php echo esc_attr( $title_id ); ?>"><?php echo esc_html( $guide['title'] ); ?></h2>
+                                    <?php if ( ! empty( $guide['intro'] ) ) : ?>
+                                        <p class="cloudsync-guide-modal__intro"><?php echo esc_html( $guide['intro'] ); ?></p>
+                                    <?php endif; ?>
+                                    <?php if ( ! empty( $guide['redirect'] ) ) : ?>
+                                        <p class="cloudsync-guide-modal__redirect"><?php echo wp_kses_post( sprintf( __( 'URI de redirección autorizada: <code>%s</code>', 'secure-pdf-viewer' ), esc_html( $guide['redirect'] ) ) ); ?></p>
+                                    <?php endif; ?>
+                                    <?php if ( ! empty( $guide['steps'] ) ) : ?>
+                                        <ol class="cloudsync-guide-modal__steps">
+                                            <?php foreach ( $guide['steps'] as $step ) : ?>
+                                                <li><?php echo wp_kses_post( $step ); ?></li>
+                                            <?php endforeach; ?>
+                                        </ol>
+                                    <?php endif; ?>
+                                    <?php if ( ! empty( $guide['extra'] ) ) : ?>
+                                        <p class="cloudsync-guide-modal__extra"><?php echo esc_html( $guide['extra'] ); ?></p>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
             <?php elseif ( 'sync' === $active_tab ) : ?>
                 <div class="cloudsync-card cloudsync-sync">
                     <h2><?php esc_html_e( 'Sincronización manual', 'secure-pdf-viewer' ); ?></h2>

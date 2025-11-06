@@ -1128,13 +1128,7 @@ class CloudSync_Manager {
      * @return string
      */
     protected function get_oauth_redirect_uri( $service ) {
-        return add_query_arg(
-            array(
-                'action'  => 'cloudsync_oauth_callback',
-                'service' => $service,
-            ),
-            admin_url( 'admin-post.php' )
-        );
+        return cloudsync_get_oauth_redirect_uri( $service );
     }
 
     /**

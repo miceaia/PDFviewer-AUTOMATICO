@@ -130,6 +130,10 @@ function cloudsync_handle_save_credentials(): void {
 
         $settings = cloudsync_get_settings();
 
+        if ( ! is_array( $settings ) ) {
+            throw new Exception( 'Error al obtener configuración.' );
+        }
+
         $client_id_key     = $service_map[ $service ]['settings']['client_id'];
         $client_secret_key = $service_map[ $service ]['settings']['client_secret'];
         $token_key         = $service_map[ $service ]['settings']['refresh_token'];
@@ -155,20 +159,35 @@ function cloudsync_handle_save_credentials(): void {
 
             $settings['sharepoint_tenant_id'] = $new_tenant;
 
-            cloudsync_opt_set( 'cloudsync_sharepoint_tenant_id', $new_tenant );
+            if ( '' !== $new_tenant ) {
+                cloudsync_opt_set( 'cloudsync_sharepoint_tenant_id', $new_tenant );
+            }
         }
 
-        if ( '' !== $refresh_token || '' === $current_refresh ) {
+        if ( '' !== $new_refresh ) {
             $settings[ $token_key ] = $new_refresh;
+        } elseif ( isset( $settings[ $token_key ] ) ) {
+            // Mantener el token existente si no se proporciona uno nuevo
+        } else {
+            $settings[ $token_key ] = '';
         }
 
         cloudsync_save_settings( $settings );
 
-        cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_id', $new_client_id );
-        cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_secret', cloudsync_encrypt( $new_client_secret ) );
+        // Guardar opciones individuales (con encriptación)
+        try {
+            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_id', $new_client_id );
 
-        if ( '' !== $new_refresh ) {
-            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_refresh_token', cloudsync_encrypt( $new_refresh ) );
+            if ( '' !== $new_client_secret ) {
+                cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_secret', cloudsync_encrypt( $new_client_secret ) );
+            }
+
+            if ( '' !== $new_refresh ) {
+                cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_refresh_token', cloudsync_encrypt( $new_refresh ) );
+            }
+        } catch ( Exception $encryption_error ) {
+            error_log( '[CloudSync] Encryption error: ' . $encryption_error->getMessage() );
+            throw new Exception( 'Error al encriptar las credenciales.' );
         }
 
         error_log( sprintf( '[CloudSync] Credentials stored for %s (client:%s, secret_updated:%s, token_updated:%s)', $service, '' === $client_id ? 'kept' : 'updated', '' === $client_secret ? 'kept' : 'updated', '' === $refresh_token ? ( '' === $current_refresh ? 'none' : 'kept' ) : 'updated' ) );

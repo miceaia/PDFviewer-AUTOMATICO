@@ -9,6 +9,148 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+if ( ! function_exists( 'cloudsync_encrypt' ) ) {
+    /**
+     * Encrypts plain text using AES-256-CBC with WordPress salts.
+     *
+     * Falls back to returning the original value when OpenSSL is missing.
+     *
+     * @since 4.1.5
+     *
+     * @param string $plain Plain text string to encrypt.
+     *
+     * @return string Encrypted string or the original plain text when encryption is not available.
+     */
+    function cloudsync_encrypt( string $plain ): string {
+        if ( '' === $plain ) {
+            return '';
+        }
+
+        if ( ! function_exists( 'openssl_encrypt' ) ) {
+            return $plain;
+        }
+
+        $key = hash( 'sha256', wp_salt( 'auth' ), true );
+        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+
+        $encrypted = openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
+
+        return $encrypted ? $encrypted : $plain;
+    }
+}
+
+if ( ! function_exists( 'cloudsync_decrypt' ) ) {
+    /**
+     * Decrypts a string previously encrypted with {@see cloudsync_encrypt()}.
+     *
+     * @since 4.1.5
+     *
+     * @param string $cipher Encrypted cipher text.
+     *
+     * @return string Decrypted string or the original cipher when OpenSSL is missing.
+     */
+    function cloudsync_decrypt( string $cipher ): string {
+        if ( '' === $cipher ) {
+            return '';
+        }
+
+        if ( ! function_exists( 'openssl_decrypt' ) ) {
+            return $cipher;
+        }
+
+        $key = hash( 'sha256', wp_salt( 'auth' ), true );
+        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+
+        $decrypted = openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
+
+        if ( false !== $decrypted ) {
+            return $decrypted;
+        }
+
+        $decoded = base64_decode( $cipher, true );
+
+        if ( false !== $decoded ) {
+            $fallback = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
+
+            if ( false !== $fallback ) {
+                return $fallback;
+            }
+        }
+
+        return $cipher;
+    }
+}
+
+if ( ! function_exists( 'cloudsync_opt_set' ) ) {
+    /**
+     * Persists a CloudSync option with autoload disabled.
+     *
+     * @since 4.1.5
+     *
+     * @param string $name  Option name.
+     * @param mixed  $value Value to persist.
+     *
+     * @return void
+     */
+    function cloudsync_opt_set( string $name, $value ): void {
+        update_option( $name, $value, false );
+    }
+}
+
+if ( ! function_exists( 'cloudsync_opt_get' ) ) {
+    /**
+     * Retrieves a CloudSync option.
+     *
+     * @since 4.1.5
+     *
+     * @param string $name    Option name.
+     * @param mixed  $default Optional default value.
+     *
+     * @return mixed
+     */
+    function cloudsync_opt_get( string $name, $default = '' ) {
+        $value = get_option( $name, null );
+
+        return null === $value ? $default : $value;
+    }
+}
+
+if ( ! function_exists( 'cloudsync_notice_success' ) ) {
+    /**
+     * Stores a success admin notice in a transient.
+     *
+     * @since 4.1.5
+     *
+     * @param string $message Message to display.
+     *
+     * @return void
+     */
+    function cloudsync_notice_success( string $message ): void {
+        set_transient( 'cloudsync_admin_notice', array(
+            'type' => 'success',
+            'msg'  => $message,
+        ), 60 );
+    }
+}
+
+if ( ! function_exists( 'cloudsync_notice_error' ) ) {
+    /**
+     * Stores an error admin notice in a transient.
+     *
+     * @since 4.1.5
+     *
+     * @param string $message Message to display.
+     *
+     * @return void
+     */
+    function cloudsync_notice_error( string $message ): void {
+        set_transient( 'cloudsync_admin_notice', array(
+            'type' => 'error',
+            'msg'  => $message,
+        ), 60 );
+    }
+}
+
 /**
  * Retrieves the cloud sync settings option.
  *
@@ -30,7 +172,7 @@ function cloudsync_get_settings() {
         'sharepoint_refresh_token' => '',
     );
 
-    $settings = get_option( 'cloudsync_settings', array() );
+    $settings = cloudsync_opt_get( 'cloudsync_settings', array() );
 
     if ( empty( $settings ) || ! is_array( $settings ) ) {
         return $defaults;
@@ -75,7 +217,7 @@ function cloudsync_get_general_settings() {
         'developer_mode'     => 0,
     );
 
-    $settings = get_option( 'cloudsync_general_settings', array() );
+    $settings = cloudsync_opt_get( 'cloudsync_general_settings', array() );
 
     if ( empty( $settings ) || ! is_array( $settings ) ) {
         return $defaults;
@@ -94,7 +236,7 @@ function cloudsync_get_general_settings() {
  * @return void
  */
 function cloudsync_save_general_settings( $settings ) {
-    update_option( 'cloudsync_general_settings', $settings );
+    cloudsync_opt_set( 'cloudsync_general_settings', $settings );
 }
 
 /**
@@ -122,7 +264,7 @@ function cloudsync_save_settings( $settings ) {
         }
     }
 
-    update_option( 'cloudsync_settings', $settings );
+    cloudsync_opt_set( 'cloudsync_settings', $settings );
 }
 
 /**
@@ -294,69 +436,6 @@ function cloudsync_get_connection_guides() {
             'extra'    => __( 'La implementación completa del conector de SharePoint requiere definir los endpoints de Microsoft Graph dentro de Connector_SharePoint.', 'secure-pdf-viewer' ),
         ),
     );
-}
-
-/**
- * Encrypts a string before persisting it to the database.
- *
- * @since 4.0.0
- *
- * @param string $data Raw token or secret.
- *
- * @return string Encrypted value or plain text when OpenSSL is unavailable.
- */
-function cloudsync_encrypt( $data ) {
-    if ( empty( $data ) ) {
-        return '';
-    }
-
-    if ( ! function_exists( 'openssl_encrypt' ) ) {
-        return $data;
-    }
-
-    $key = wp_salt( 'secure_auth' );
-    $iv  = substr( hash( 'sha256', AUTH_KEY . SECURE_AUTH_SALT ), 0, 16 );
-
-    $encrypted = openssl_encrypt( $data, 'AES-256-CBC', $key, 0, $iv );
-
-    if ( false === $encrypted ) {
-        return $data;
-    }
-
-    return base64_encode( $encrypted );
-}
-
-/**
- * Decrypts a string retrieved from the database.
- *
- * @since 4.0.0
- *
- * @param string $data Encrypted payload.
- *
- * @return string Decrypted value or the original payload when OpenSSL is unavailable.
- */
-function cloudsync_decrypt( $data ) {
-    if ( empty( $data ) ) {
-        return '';
-    }
-
-    if ( ! function_exists( 'openssl_decrypt' ) ) {
-        return $data;
-    }
-
-    $key = wp_salt( 'secure_auth' );
-    $iv  = substr( hash( 'sha256', AUTH_KEY . SECURE_AUTH_SALT ), 0, 16 );
-
-    $decoded = base64_decode( $data, true );
-
-    if ( false === $decoded ) {
-        // Backwards compatibility: return raw value when it was stored as plain text previously.
-        return $data;
-    }
-
-    $decrypted = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
-
-    return false === $decrypted ? '' : $decrypted;
 }
 
 /**

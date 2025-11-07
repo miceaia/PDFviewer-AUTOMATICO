@@ -76,62 +76,17 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
             <h1>☁️ <?php esc_html_e( 'CloudSync LMS Dashboard', 'secure-pdf-viewer' ); ?></h1>
 
             <?php
-            $settings_updated = isset( $_GET['settings-updated'] ) ? sanitize_text_field( wp_unslash( $_GET['settings-updated'] ) ) : '';
-            if ( $settings_updated && empty( $notice ) ) :
+            $flash_notice = get_transient( 'cloudsync_admin_notice' );
+            if ( $flash_notice ) :
+                delete_transient( 'cloudsync_admin_notice' );
+                $notice_class = ( isset( $flash_notice['type'] ) && 'success' === $flash_notice['type'] ) ? 'notice notice-success' : 'notice notice-error';
                 ?>
+                <div class="<?php echo esc_attr( $notice_class ); ?> is-dismissible">
+                    <p><?php echo esc_html( $flash_notice['msg'] ); ?></p>
+                </div>
+            <?php elseif ( isset( $_GET['settings-updated'] ) ) : ?>
                 <div class="notice notice-success is-dismissible">
                     <p>✅ <?php esc_html_e( 'Cambios guardados correctamente.', 'secure-pdf-viewer' ); ?></p>
-                </div>
-            <?php elseif ( ! empty( $notice ) ) : ?>
-                <?php
-                $error_notices = array( 'oauth-error', 'invalid-service', 'missing-credentials' );
-                $notice_class  = in_array( $notice, $error_notices, true ) ? 'notice notice-error is-dismissible' : 'notice notice-success is-dismissible';
-                ?>
-                <div class="<?php echo esc_attr( $notice_class ); ?>">
-                    <p>
-                        <?php
-                        switch ( $notice ) {
-                            case 'manual-sync':
-                                esc_html_e( 'Sincronización manual completada correctamente.', 'secure-pdf-viewer' );
-                                break;
-                            case 'force-sync':
-                                esc_html_e( 'Sincronización forzada ejecutada correctamente.', 'secure-pdf-viewer' );
-                                break;
-                            case 'cleanup':
-                                esc_html_e( 'Metadatos huérfanos eliminados.', 'secure-pdf-viewer' );
-                                break;
-                            case 'reset-tokens':
-                                esc_html_e( 'Tokens OAuth reiniciados.', 'secure-pdf-viewer' );
-                                break;
-                            case 'rebuild':
-                                esc_html_e( 'Estructura de carpetas re-sincronizada.', 'secure-pdf-viewer' );
-                                break;
-                            case 'developer-mode':
-                                esc_html_e( 'Preferencias de modo desarrollador actualizadas.', 'secure-pdf-viewer' );
-                                break;
-                            case 'credentials-saved':
-                                esc_html_e( 'Credenciales guardadas correctamente.', 'secure-pdf-viewer' );
-                                break;
-                            case 'connected':
-                                esc_html_e( 'Conexión OAuth completada con éxito.', 'secure-pdf-viewer' );
-                                break;
-                            case 'revoked':
-                                esc_html_e( 'Acceso revocado correctamente.', 'secure-pdf-viewer' );
-                                break;
-                            case 'missing-credentials':
-                                esc_html_e( 'Completa los campos obligatorios antes de iniciar sesión.', 'secure-pdf-viewer' );
-                                break;
-                            case 'oauth-error':
-                                esc_html_e( 'No se pudo completar la autorización OAuth. Intenta nuevamente.', 'secure-pdf-viewer' );
-                                break;
-                            case 'invalid-service':
-                                esc_html_e( 'Servicio desconocido. Actualiza la página e inténtalo otra vez.', 'secure-pdf-viewer' );
-                                break;
-                            default:
-                                esc_html_e( 'Acción completada.', 'secure-pdf-viewer' );
-                        }
-                        ?>
-                    </p>
                 </div>
             <?php endif; ?>
 
@@ -152,7 +107,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
 
             <?php if ( 'general' === $active_tab ) : ?>
                 <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-card">
-                    <?php wp_nonce_field( 'cloudsync_save_config', 'cloudsync_nonce' ); ?>
+                    <?php wp_nonce_field( 'cloudsync_config_nonce' ); ?>
                     <input type="hidden" name="action" value="cloudsync_save_config" />
                     <input type="hidden" name="cloudsync_general_settings[developer_mode]" value="<?php echo (int) $general_settings['developer_mode']; ?>" />
                     <h2><?php esc_html_e( 'Configuración general', 'secure-pdf-viewer' ); ?></h2>
@@ -213,105 +168,132 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                     <?php submit_button( __( 'Guardar cambios', 'secure-pdf-viewer' ) ); ?>
                 </form>
             <?php elseif ( 'oauth' === $active_tab ) : ?>
+                <?php
+                $drive_connected      = ! empty( $oauth_settings['google_refresh_token'] );
+                $dropbox_connected    = ! empty( $oauth_settings['dropbox_refresh_token'] );
+                $sharepoint_connected = ! empty( $oauth_settings['sharepoint_refresh_token'] );
+
+                $drive_connect_url   = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_oauth_connect&service=drive' ), 'cloudsync_credentials_nonce' );
+                $drive_revoke_url    = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_access&service=drive' ), 'cloudsync_credentials_nonce' );
+                $dropbox_revoke_url  = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_access&service=dropbox' ), 'cloudsync_credentials_nonce' );
+                $share_revoke_url    = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_access&service=sharepoint' ), 'cloudsync_credentials_nonce' );
+
+                $drive_secret_placeholder      = $oauth_settings['google_client_secret'] ? str_repeat( '•', 8 ) : '';
+                $drive_refresh_placeholder     = $drive_connected ? str_repeat( '•', 8 ) : '';
+                $dropbox_secret_placeholder    = $oauth_settings['dropbox_app_secret'] ? str_repeat( '•', 8 ) : '';
+                $dropbox_refresh_placeholder   = $dropbox_connected ? str_repeat( '•', 8 ) : '';
+                $sharepoint_secret_placeholder = $oauth_settings['sharepoint_secret'] ? str_repeat( '•', 8 ) : '';
+                $sharepoint_refresh_placeholder = $sharepoint_connected ? str_repeat( '•', 8 ) : '';
+                ?>
                 <div class="cloudsync-card">
                     <h2><?php esc_html_e( 'Credenciales OAuth', 'secure-pdf-viewer' ); ?></h2>
-                    <p class="description"><?php esc_html_e( 'Registra tus llaves OAuth. Los tokens sensibles se cifran automáticamente.', 'secure-pdf-viewer' ); ?></p>
+                    <p class="description"><?php esc_html_e( 'Guarda tus claves de cliente. Los secretos se cifran automáticamente antes de almacenarse.', 'secure-pdf-viewer' ); ?></p>
                     <div class="cloudsync-oauth-grid">
-                        <?php
-                        foreach ( $service_definitions as $service => $definition ) :
-                            $token_field      = $definition['token_field'];
-                            $connected        = ! empty( $oauth_settings[ $token_field ] );
-                            $required_fields  = isset( $definition['required_fields'] ) ? $definition['required_fields'] : array();
-                            $requirements_met = true;
-
-                            foreach ( $required_fields as $required_field ) {
-                                if ( empty( $oauth_settings[ $required_field ] ) ) {
-                                    $requirements_met = false;
-                                    break;
-                                }
-                            }
-
-                            $connect_url = wp_nonce_url(
-                                add_query_arg(
-                                    array(
-                                        'action'  => 'cloudsync_oauth_connect',
-                                        'service' => $service,
-                                    ),
-                                    admin_url( 'admin-post.php' )
-                                ),
-                                'cloudsync_oauth_action'
-                            );
-
-                            $revoke_url = wp_nonce_url(
-                                add_query_arg(
-                                    array(
-                                        'action'  => 'cloudsync_revoke_access',
-                                        'service' => $service,
-                                    ),
-                                    admin_url( 'admin-post.php' )
-                                ),
-                                'cloudsync_oauth_action'
-                            );
-                        ?>
-                        <section class="cloudsync-service-card" aria-labelledby="cloudsync-card-<?php echo esc_attr( $service ); ?>">
+                        <section class="cloudsync-service-card" aria-labelledby="cloudsync-card-drive">
+                            <header>
+                                <div class="cloudsync-service-heading">
+                                    <h3 id="cloudsync-card-drive"><?php esc_html_e( 'Google Drive', 'secure-pdf-viewer' ); ?></h3>
+                                    <?php echo $drive_connected ? $status_icons[ true ] : $status_icons[ false ]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                                </div>
+                            </header>
                             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-service-form">
-                                <?php wp_nonce_field( 'cloudsync_oauth_action', 'cloudsync_oauth_nonce' ); ?>
+                                <?php wp_nonce_field( 'cloudsync_credentials_nonce' ); ?>
                                 <input type="hidden" name="action" value="cloudsync_save_credentials" />
-                                <input type="hidden" name="service" value="<?php echo esc_attr( $service ); ?>" />
-                                <header>
-                                    <div class="cloudsync-service-heading">
-                                        <h3 id="cloudsync-card-<?php echo esc_attr( $service ); ?>"><?php echo esc_html( $definition['label'] ); ?></h3>
-                                    </div>
-                                    <?php echo $connected ? $status_icons[ true ] : $status_icons[ false ]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                                </header>
-                                <div class="cloudsync-service-fields">
-                                    <?php foreach ( $definition['fields'] as $field_key => $field_meta ) :
-                                        $is_sensitive   = ! empty( $field_meta['sensitive'] );
-                                        $is_token       = ! empty( $field_meta['is_token'] );
-                                        $stored_value   = isset( $oauth_settings[ $field_key ] ) ? $oauth_settings[ $field_key ] : '';
-                                        $input_type     = $is_sensitive ? 'password' : 'text';
-                                        $display_value  = $is_sensitive ? '' : $stored_value;
-                                        $placeholder    = ( $is_sensitive && ! empty( $stored_value ) ) ? str_repeat( '•', 8 ) : '';
-                                    ?>
-                                    <p class="cloudsync-service-field">
-                                        <label for="<?php echo esc_attr( $field_key ); ?>"><?php echo esc_html( $field_meta['label'] ); ?></label>
-                                        <input type="<?php echo esc_attr( $input_type ); ?>"
-                                            id="<?php echo esc_attr( $field_key ); ?>"
-                                            name="<?php echo esc_attr( $field_key ); ?>"
-                                            value="<?php echo esc_attr( $display_value ); ?>"
-                                            class="regular-text"
-                                            <?php if ( $placeholder ) : ?>placeholder="<?php echo esc_attr( $placeholder ); ?>"<?php endif; ?>
-                                            <?php echo $is_sensitive ? 'autocomplete="off"' : ''; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
-                                        />
-                                        <?php if ( $is_sensitive && ! empty( $stored_value ) ) : ?>
-                                            <input type="hidden" name="<?php echo esc_attr( $field_key . '_keep' ); ?>" value="1" />
-                                        <?php endif; ?>
-                                        <?php if ( $is_token && ! empty( $stored_value ) ) : ?>
-                                            <span class="cloudsync-field-note"><?php esc_html_e( 'Token almacenado', 'secure-pdf-viewer' ); ?></span>
-                                        <?php endif; ?>
-                                    </p>
-                                    <?php endforeach; ?>
-                                </div>
+                                <input type="hidden" name="service" value="drive" />
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-drive-client-id"><?php esc_html_e( 'Client ID', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="text" class="regular-text" id="cloudsync-drive-client-id" name="client_id" value="<?php echo esc_attr( $oauth_settings['google_client_id'] ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-drive-client-secret"><?php esc_html_e( 'Client Secret', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="password" class="regular-text" id="cloudsync-drive-client-secret" name="client_secret" placeholder="<?php echo esc_attr( $drive_secret_placeholder ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-drive-refresh"><?php esc_html_e( 'Refresh Token', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="password" class="regular-text" id="cloudsync-drive-refresh" name="refresh_token" placeholder="<?php echo esc_attr( $drive_refresh_placeholder ); ?>" autocomplete="off" />
+                                </p>
                                 <div class="cloudsync-actions">
-                                    <?php
-                                    $guide_config = isset( $definition['guide'] ) ? $definition['guide'] : '';
-                                    if ( is_array( $guide_config ) && isset( $guide_config['type'] ) && 'internal' === $guide_config['type'] ) :
-                                        $guide_slug = isset( $guide_config['slug'] ) ? $guide_config['slug'] : $service;
-                                        ?>
-                                        <button type="button" class="button button-link js-cloudsync-guide" data-service="<?php echo esc_attr( $guide_slug ); ?>"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
-                                    <?php elseif ( ! empty( $guide_config ) ) : ?>
-                                        <a class="button button-link" href="<?php echo esc_url( $guide_config ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></a>
-                                    <?php endif; ?>
                                     <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
-                                    <button type="button" class="button button-secondary js-cloudsync-connect" data-oauth-url="<?php echo esc_url( $connect_url ); ?>" data-service="<?php echo esc_attr( $service ); ?>" <?php disabled( ! $requirements_met ); ?>><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
-                                    <a class="button button-link-delete" href="<?php echo esc_url( $revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
+                                    <a class="button" href="<?php echo esc_url( $drive_connect_url ); ?>" onclick="return cloudsyncOAuthPopup( this.href );"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></a>
+                                    <a class="button-link-delete" href="<?php echo esc_url( $drive_revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
+                                    <?php if ( isset( $connection_guides['google'] ) ) : ?>
+                                        <button type="button" class="button button-link js-cloudsync-guide" data-service="google"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
+                                    <?php endif; ?>
                                 </div>
-                                <?php if ( ! $requirements_met ) : ?>
-                                    <p class="cloudsync-requirements"><?php esc_html_e( 'Completa los campos obligatorios antes de iniciar sesión.', 'secure-pdf-viewer' ); ?></p>
-                                <?php endif; ?>
                             </form>
                         </section>
-                        <?php endforeach; ?>
+
+                        <section class="cloudsync-service-card" aria-labelledby="cloudsync-card-dropbox">
+                            <header>
+                                <div class="cloudsync-service-heading">
+                                    <h3 id="cloudsync-card-dropbox"><?php esc_html_e( 'Dropbox', 'secure-pdf-viewer' ); ?></h3>
+                                    <?php echo $dropbox_connected ? $status_icons[ true ] : $status_icons[ false ]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                                </div>
+                            </header>
+                            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-service-form">
+                                <?php wp_nonce_field( 'cloudsync_credentials_nonce' ); ?>
+                                <input type="hidden" name="action" value="cloudsync_save_credentials" />
+                                <input type="hidden" name="service" value="dropbox" />
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-dropbox-key"><?php esc_html_e( 'App Key', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="text" class="regular-text" id="cloudsync-dropbox-key" name="client_id" value="<?php echo esc_attr( $oauth_settings['dropbox_app_key'] ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-dropbox-secret"><?php esc_html_e( 'App Secret', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="password" class="regular-text" id="cloudsync-dropbox-secret" name="client_secret" placeholder="<?php echo esc_attr( $dropbox_secret_placeholder ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-dropbox-refresh"><?php esc_html_e( 'Refresh Token', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="password" class="regular-text" id="cloudsync-dropbox-refresh" name="refresh_token" placeholder="<?php echo esc_attr( $dropbox_refresh_placeholder ); ?>" autocomplete="off" />
+                                </p>
+                                <div class="cloudsync-actions">
+                                    <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
+                                    <button type="button" class="button" disabled aria-disabled="true"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
+                                    <a class="button-link-delete" href="<?php echo esc_url( $dropbox_revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
+                                    <?php if ( isset( $connection_guides['dropbox'] ) ) : ?>
+                                        <button type="button" class="button button-link js-cloudsync-guide" data-service="dropbox"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </section>
+
+                        <section class="cloudsync-service-card" aria-labelledby="cloudsync-card-sharepoint">
+                            <header>
+                                <div class="cloudsync-service-heading">
+                                    <h3 id="cloudsync-card-sharepoint"><?php esc_html_e( 'SharePoint / OneDrive', 'secure-pdf-viewer' ); ?></h3>
+                                    <?php echo $sharepoint_connected ? $status_icons[ true ] : $status_icons[ false ]; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                                </div>
+                            </header>
+                            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-service-form">
+                                <?php wp_nonce_field( 'cloudsync_credentials_nonce' ); ?>
+                                <input type="hidden" name="action" value="cloudsync_save_credentials" />
+                                <input type="hidden" name="service" value="sharepoint" />
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-sharepoint-tenant"><?php esc_html_e( 'Tenant ID', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="text" class="regular-text" id="cloudsync-sharepoint-tenant" name="tenant_id" value="<?php echo esc_attr( $oauth_settings['sharepoint_tenant_id'] ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-sharepoint-client"><?php esc_html_e( 'Client ID', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="text" class="regular-text" id="cloudsync-sharepoint-client" name="client_id" value="<?php echo esc_attr( $oauth_settings['sharepoint_client_id'] ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-sharepoint-secret"><?php esc_html_e( 'Client Secret', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="password" class="regular-text" id="cloudsync-sharepoint-secret" name="client_secret" placeholder="<?php echo esc_attr( $sharepoint_secret_placeholder ); ?>" autocomplete="off" />
+                                </p>
+                                <p class="cloudsync-service-field">
+                                    <label for="cloudsync-sharepoint-refresh"><?php esc_html_e( 'Refresh Token', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="password" class="regular-text" id="cloudsync-sharepoint-refresh" name="refresh_token" placeholder="<?php echo esc_attr( $sharepoint_refresh_placeholder ); ?>" autocomplete="off" />
+                                </p>
+                                <div class="cloudsync-actions">
+                                    <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
+                                    <button type="button" class="button" disabled aria-disabled="true"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
+                                    <a class="button-link-delete" href="<?php echo esc_url( $share_revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
+                                    <?php if ( isset( $connection_guides['sharepoint'] ) ) : ?>
+                                        <button type="button" class="button button-link js-cloudsync-guide" data-service="sharepoint"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </section>
                     </div>
                 </div>
                 <?php if ( ! empty( $connection_guides ) ) : ?>
@@ -519,7 +501,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                             <p><?php esc_html_e( 'Elimina los metadatos actuales y vuelve a generar las carpetas remotas asignadas a cada curso o lección.', 'secure-pdf-viewer' ); ?></p>
                             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" onsubmit="return confirm('<?php echo esc_js( __( 'Esta acción recreará todas las carpetas. ¿Deseas continuar?', 'secure-pdf-viewer' ) ); ?>');">
                                 <?php wp_nonce_field( 'cloudsync_rebuild_structure' ); ?>
-                                <input type="hidden" name="action" value="cloudsync_rebuild_structure" />
+                                <input type="hidden" name="action" value="cloudsync_reinitialize_folders" />
                                 <button type="submit" class="button button-secondary"><?php esc_html_e( 'Reinicializar', 'secure-pdf-viewer' ); ?></button>
                             </form>
                         </section>
@@ -537,7 +519,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                             <p><?php esc_html_e( 'Elimina referencias remotas de cursos o lecciones eliminadas para mantener la base de datos ligera.', 'secure-pdf-viewer' ); ?></p>
                             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
                                 <?php wp_nonce_field( 'cloudsync_cleanup_meta' ); ?>
-                                <input type="hidden" name="action" value="cloudsync_cleanup_meta" />
+                                <input type="hidden" name="action" value="cloudsync_cleanup_orphans" />
                                 <button type="submit" class="button button-secondary"><?php esc_html_e( 'Limpiar ahora', 'secure-pdf-viewer' ); ?></button>
                             </form>
                         </section>
@@ -547,13 +529,6 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-token-reset">
                                 <?php wp_nonce_field( 'cloudsync_reset_tokens' ); ?>
                                 <input type="hidden" name="action" value="cloudsync_reset_tokens" />
-                                <label class="screen-reader-text" for="cloudsync-reset-service"><?php esc_html_e( 'Servicio a reiniciar', 'secure-pdf-viewer' ); ?></label>
-                                <select id="cloudsync-reset-service" name="service">
-                                    <option value=""><?php esc_html_e( 'Todos los servicios', 'secure-pdf-viewer' ); ?></option>
-                                    <option value="google"><?php esc_html_e( 'Google Drive', 'secure-pdf-viewer' ); ?></option>
-                                    <option value="dropbox"><?php esc_html_e( 'Dropbox', 'secure-pdf-viewer' ); ?></option>
-                                    <option value="sharepoint"><?php esc_html_e( 'SharePoint / OneDrive', 'secure-pdf-viewer' ); ?></option>
-                                </select>
                                 <button type="submit" class="button button-secondary"><?php esc_html_e( 'Reiniciar tokens', 'secure-pdf-viewer' ); ?></button>
                             </form>
                         </section>
@@ -562,7 +537,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                         <h3><?php esc_html_e( 'Modo desarrollador', 'secure-pdf-viewer' ); ?></h3>
                         <p><?php esc_html_e( 'Activa información adicional sobre hooks y endpoints disponibles.', 'secure-pdf-viewer' ); ?></p>
                         <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-developer-form">
-                            <?php wp_nonce_field( 'cloudsync_save_advanced', 'cloudsync_advanced_nonce' ); ?>
+                            <?php wp_nonce_field( 'cloudsync_advanced_nonce' ); ?>
                             <input type="hidden" name="action" value="cloudsync_save_advanced" />
                             <label>
                                 <input type="checkbox" name="developer_mode" value="1" <?php checked( (int) $general_settings['developer_mode'], 1 ); ?> />

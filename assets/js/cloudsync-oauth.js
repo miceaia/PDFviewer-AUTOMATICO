@@ -8,6 +8,37 @@
     let activeGuide = null;
     let lastGuideTrigger = null;
 
+    window.cloudsyncOAuthPopup = function (url) {
+        if (!url) {
+            return false;
+        }
+
+        const width = settings.popupWidth || 600;
+        const height = settings.popupHeight || 700;
+        const dualScreenLeft = window.screenLeft !== undefined ? window.screenLeft : window.screenX;
+        const dualScreenTop = window.screenTop !== undefined ? window.screenTop : window.screenY;
+        const screenWidth = window.innerWidth || document.documentElement.clientWidth || screen.width;
+        const screenHeight = window.innerHeight || document.documentElement.clientHeight || screen.height;
+        const left = dualScreenLeft + Math.max(0, (screenWidth - width) / 2);
+        const top = dualScreenTop + Math.max(0, (screenHeight - height) / 2);
+        const features = `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+
+        const popup = window.open(url, settings.popupName || 'cloudsync-oauth-popup', features);
+
+        if (popup) {
+            popup.focus();
+
+            const watcher = window.setInterval(() => {
+                if (popup.closed) {
+                    window.clearInterval(watcher);
+                    window.location.reload();
+                }
+            }, 800);
+        }
+
+        return false;
+    };
+
     function handleConnectClick(event) {
         const trigger = event.currentTarget;
         const url = trigger.getAttribute('data-oauth-url');
@@ -17,16 +48,7 @@
         }
 
         event.preventDefault();
-
-        const left = window.screenX + Math.max(0, (window.outerWidth - settings.popupWidth) / 2);
-        const top = window.screenY + Math.max(0, (window.outerHeight - settings.popupHeight) / 2);
-        const features = `width=${settings.popupWidth},height=${settings.popupHeight},left=${left},top=${top},resizable=yes,scrollbars=yes`;
-
-        const popup = window.open(url, settings.popupName, features);
-
-        if (popup) {
-            popup.focus();
-        }
+        window.cloudsyncOAuthPopup(url);
     }
 
     function bindConnectButtons() {
@@ -130,37 +152,9 @@
         });
     }
 
-    function listenForCompletion() {
-        window.addEventListener('message', (event) => {
-            if (!event.data || event.data.type !== 'cloudsync_oauth_complete') {
-                return;
-            }
-
-            window.location.reload();
-        });
-    }
-
-    function notifyParentIfPopup() {
-        if (!window.opener || window.opener.closed) {
-            return;
-        }
-
-        try {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('cloudsync_popup') === '1') {
-                window.opener.postMessage({ type: 'cloudsync_oauth_complete' }, window.location.origin);
-                window.close();
-            }
-        } catch (error) {
-            // Silently fail if URL parsing is not available.
-        }
-    }
-
     document.addEventListener('DOMContentLoaded', () => {
         bindConnectButtons();
         bindGuideButtons();
         bindGuideClosers();
-        listenForCompletion();
-        notifyParentIfPopup();
     });
 })();

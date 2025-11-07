@@ -303,17 +303,25 @@ function cloudsync_get_connection_guides() {
  *
  * @param string $data Raw token or secret.
  *
- * @return string Encrypted value.
+ * @return string Encrypted value or plain text when OpenSSL is unavailable.
  */
 function cloudsync_encrypt( $data ) {
     if ( empty( $data ) ) {
         return '';
     }
 
+    if ( ! function_exists( 'openssl_encrypt' ) ) {
+        return $data;
+    }
+
     $key = wp_salt( 'secure_auth' );
     $iv  = substr( hash( 'sha256', AUTH_KEY . SECURE_AUTH_SALT ), 0, 16 );
 
     $encrypted = openssl_encrypt( $data, 'AES-256-CBC', $key, 0, $iv );
+
+    if ( false === $encrypted ) {
+        return $data;
+    }
 
     return base64_encode( $encrypted );
 }
@@ -325,11 +333,15 @@ function cloudsync_encrypt( $data ) {
  *
  * @param string $data Encrypted payload.
  *
- * @return string Decrypted value.
+ * @return string Decrypted value or the original payload when OpenSSL is unavailable.
  */
 function cloudsync_decrypt( $data ) {
     if ( empty( $data ) ) {
         return '';
+    }
+
+    if ( ! function_exists( 'openssl_decrypt' ) ) {
+        return $data;
     }
 
     $key = wp_salt( 'secure_auth' );

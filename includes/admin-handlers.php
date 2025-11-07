@@ -187,38 +187,83 @@ function cloudsync_handle_save_credentials() {
     $service     = isset( $_POST['service'] ) ? sanitize_key( wp_unslash( $_POST['service'] ) ) : '';
     $definitions = cloudsync_get_service_definitions();
 
-    if ( ! $service || ! isset( $definitions[ $service ] ) ) {
+    error_log( '[CloudSync] Received credential save request for service: ' . ( $service ? $service : 'unknown' ) );
+
+    if ( empty( $service ) || ! isset( $definitions[ $service ] ) ) {
+        error_log( '[CloudSync] Aborting credential save: invalid service identifier.' );
+
         $redirect = add_query_arg(
             array(
-                'page'             => 'cloudsync-dashboard-oauth',
                 'tab'              => 'oauth',
                 'cloudsync_notice' => 'invalid-service',
             ),
-            admin_url( 'admin.php' )
+            admin_url( 'admin.php?page=cloudsync-dashboard' )
         );
 
         wp_safe_redirect( $redirect );
         exit;
     }
 
-    $settings = cloudsync_get_settings();
+    $settings      = cloudsync_get_settings();
+    $service_fields = isset( $definitions[ $service ]['fields'] ) ? $definitions[ $service ]['fields'] : array();
+    $log_snapshot  = array();
 
-    foreach ( $definitions[ $service ]['fields'] as $field_key => $field_config ) {
-        $incoming = isset( $_POST[ $field_key ] ) ? wp_unslash( $_POST[ $field_key ] ) : '';
-        $keep     = isset( $_POST[ $field_key . '_keep' ] ) && '1' === $_POST[ $field_key . '_keep' ];
+    foreach ( $service_fields as $field_key => $field_config ) {
+        $incoming_raw   = isset( $_POST[ $field_key ] ) ? wp_unslash( $_POST[ $field_key ] ) : '';
+        $incoming_value = is_scalar( $incoming_raw ) ? (string) $incoming_raw : '';
+        $keep_existing  = isset( $_POST[ $field_key . '_keep' ] ) && '1' === (string) wp_unslash( $_POST[ $field_key . '_keep' ] );
 
-        if ( '' === $incoming ) {
-            if ( $keep && isset( $settings[ $field_key ] ) ) {
+        if ( '' === trim( $incoming_value ) ) {
+            if ( $keep_existing && isset( $settings[ $field_key ] ) && '' !== $settings[ $field_key ] ) {
+                $log_snapshot[ $field_key ] = 'kept';
                 continue;
             }
 
             $settings[ $field_key ] = '';
+            $log_snapshot[ $field_key ] = 'cleared';
         } else {
-            $settings[ $field_key ] = sanitize_text_field( $incoming );
+            $sanitized_value          = sanitize_text_field( $incoming_value );
+            $settings[ $field_key ]   = $sanitized_value;
+            $log_snapshot[ $field_key ] = 'length:' . strlen( $sanitized_value );
         }
     }
 
-    cloudsync_save_settings( $settings );
+    if ( function_exists( 'wp_json_encode' ) ) {
+        error_log( '[CloudSync] Sanitized payload for ' . $service . ': ' . wp_json_encode( $log_snapshot ) );
+    }
+
+    if ( ! function_exists( 'openssl_encrypt' ) ) {
+        error_log( '[CloudSync] Warning: OpenSSL extension is not available. Credentials will be stored without encryption.' );
+    }
+
+    try {
+        cloudsync_save_settings( $settings );
+    } catch ( Throwable $exception ) {
+        error_log( '[CloudSync] Failed to save credentials for ' . $service . ': ' . $exception->getMessage() );
+
+        $error_redirect = wp_get_referer();
+        $fallback       = add_query_arg(
+            array(
+                'page'             => 'cloudsync-dashboard',
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'oauth-error',
+            ),
+            admin_url( 'admin.php' )
+        );
+
+        $error_redirect = $error_redirect ? wp_validate_redirect( $error_redirect, $fallback ) : $fallback;
+        $error_redirect = remove_query_arg( array( 'settings-updated', 'cloudsync_notice' ), $error_redirect );
+        $error_redirect = add_query_arg(
+            array(
+                'tab'              => 'oauth',
+                'cloudsync_notice' => 'oauth-error',
+            ),
+            $error_redirect
+        );
+
+        wp_safe_redirect( $error_redirect );
+        exit;
+    }
 
     $service_label = isset( $definitions[ $service ]['label'] ) ? wp_strip_all_tags( $definitions[ $service ]['label'] ) : ucfirst( $service );
 
@@ -227,16 +272,27 @@ function cloudsync_handle_save_credentials() {
         array( 'service' => $service )
     );
 
+    $redirect    = wp_get_referer();
+    $fallback    = add_query_arg(
+        array(
+            'page' => 'cloudsync-dashboard',
+            'tab'  => 'oauth',
+        ),
+        admin_url( 'admin.php' )
+    );
+    $redirect = $redirect ? wp_validate_redirect( $redirect, $fallback ) : $fallback;
+    $redirect = remove_query_arg( array( 'settings-updated', 'cloudsync_notice', 'service' ), $redirect );
     $redirect = add_query_arg(
         array(
-            'page'             => 'cloudsync-dashboard-oauth',
             'tab'              => 'oauth',
             'service'          => $service,
             'cloudsync_notice' => 'credentials-saved',
             'settings-updated' => 'true',
         ),
-        admin_url( 'admin.php' )
+        $redirect
     );
+
+    error_log( '[CloudSync] Credentials saved successfully for ' . $service . '. Redirecting to: ' . $redirect );
 
     wp_safe_redirect( $redirect );
     exit;

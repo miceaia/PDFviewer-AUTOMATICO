@@ -27,15 +27,29 @@ if ( ! function_exists( 'cloudsync_encrypt' ) ) {
         }
 
         if ( ! function_exists( 'openssl_encrypt' ) ) {
+            error_log( '[CloudSync] Warning: OpenSSL not available, storing credentials in plain text.' );
             return $plain;
         }
 
-        $key = hash( 'sha256', wp_salt( 'auth' ), true );
-        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+        try {
+            $key = hash( 'sha256', wp_salt( 'auth' ), true );
+            $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
 
-        $encrypted = openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
+            if ( strlen( $iv ) < 16 ) {
+                throw new Exception( 'IV length is insufficient.' );
+            }
 
-        return $encrypted ? $encrypted : $plain;
+            $encrypted = openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
+
+            if ( false === $encrypted ) {
+                throw new Exception( 'Encryption failed.' );
+            }
+
+            return $encrypted;
+        } catch ( Exception $e ) {
+            error_log( '[CloudSync] Encryption error: ' . $e->getMessage() );
+            return $plain;
+        }
     }
 }
 
@@ -58,26 +72,38 @@ if ( ! function_exists( 'cloudsync_decrypt' ) ) {
             return $cipher;
         }
 
-        $key = hash( 'sha256', wp_salt( 'auth' ), true );
-        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+        try {
+            $key = hash( 'sha256', wp_salt( 'auth' ), true );
+            $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
 
-        $decrypted = openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
-
-        if ( false !== $decrypted ) {
-            return $decrypted;
-        }
-
-        $decoded = base64_decode( $cipher, true );
-
-        if ( false !== $decoded ) {
-            $fallback = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
-
-            if ( false !== $fallback ) {
-                return $fallback;
+            if ( strlen( $iv ) < 16 ) {
+                throw new Exception( 'IV length is insufficient.' );
             }
-        }
 
-        return $cipher;
+            $decrypted = openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
+
+            if ( false !== $decrypted ) {
+                return $decrypted;
+            }
+
+            // Intento de fallback con base64
+            $decoded = base64_decode( $cipher, true );
+
+            if ( false !== $decoded ) {
+                $fallback = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
+
+                if ( false !== $fallback ) {
+                    return $fallback;
+                }
+            }
+
+            // Si todo falla, devolver el texto original
+            error_log( '[CloudSync] Warning: Failed to decrypt value, returning as-is.' );
+            return $cipher;
+        } catch ( Exception $e ) {
+            error_log( '[CloudSync] Decryption error: ' . $e->getMessage() );
+            return $cipher;
+        }
     }
 }
 
@@ -249,6 +275,11 @@ function cloudsync_save_general_settings( $settings ) {
  * @return void
  */
 function cloudsync_save_settings( $settings ) {
+    if ( ! is_array( $settings ) ) {
+        error_log( '[CloudSync] save_settings: Invalid settings format (not an array).' );
+        return;
+    }
+
     $sensitive_fields = array(
         'google_client_secret',
         'google_refresh_token',
@@ -259,7 +290,7 @@ function cloudsync_save_settings( $settings ) {
     );
 
     foreach ( $sensitive_fields as $key ) {
-        if ( isset( $settings[ $key ] ) && '' !== $settings[ $key ] ) {
+        if ( isset( $settings[ $key ] ) && '' !== $settings[ $key ] && is_string( $settings[ $key ] ) ) {
             $settings[ $key ] = cloudsync_encrypt( $settings[ $key ] );
         }
     }

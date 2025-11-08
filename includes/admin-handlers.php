@@ -128,69 +128,64 @@ function cloudsync_handle_save_credentials(): void {
         $refresh_token = isset( $_POST['refresh_token'] ) ? sanitize_text_field( wp_unslash( $_POST['refresh_token'] ) ) : '';
         $tenant_id     = isset( $_POST['tenant_id'] ) ? sanitize_text_field( wp_unslash( $_POST['tenant_id'] ) ) : '';
 
-        $settings = cloudsync_get_settings();
-
-        if ( ! is_array( $settings ) ) {
-            throw new Exception( 'Error al obtener configuración.' );
-        }
-
         $client_id_key     = $service_map[ $service ]['settings']['client_id'];
         $client_secret_key = $service_map[ $service ]['settings']['client_secret'];
         $token_key         = $service_map[ $service ]['settings']['refresh_token'];
 
-        $current_client_id     = isset( $settings[ $client_id_key ] ) ? $settings[ $client_id_key ] : '';
-        $current_client_secret = isset( $settings[ $client_secret_key ] ) ? $settings[ $client_secret_key ] : '';
-        $current_refresh       = isset( $settings[ $token_key ] ) ? $settings[ $token_key ] : '';
+        // SOLUCIÓN AL BUG DE DOBLE ENCRIPTACIÓN:
+        // Leer settings actuales DESENCRIPTADOS
+        $settings = cloudsync_get_settings();
 
-        $new_client_id     = '' !== $client_id ? $client_id : $current_client_id;
-        $new_client_secret = '' !== $client_secret ? $client_secret : $current_client_secret;
-        $new_refresh       = '' !== $refresh_token ? $refresh_token : $current_refresh;
-
-        if ( '' === $new_client_id || '' === $new_client_secret ) {
-            throw new Exception( 'Client ID y Client Secret son obligatorios.' );
+        if ( ! is_array( $settings ) ) {
+            $settings = array();
         }
 
-        $settings[ $client_id_key ]     = $new_client_id;
-        $settings[ $client_secret_key ] = $new_client_secret;
+        // Actualizar SOLO los campos que vienen del formulario (valores nuevos en texto plano)
+        // Los campos que no vienen (placeholder vacío) se MANTIENEN sin cambios
 
-        if ( 'sharepoint' === $service ) {
-            $current_tenant = isset( $settings['sharepoint_tenant_id'] ) ? $settings['sharepoint_tenant_id'] : '';
-            $new_tenant     = '' !== $tenant_id ? $tenant_id : $current_tenant;
-
-            $settings['sharepoint_tenant_id'] = $new_tenant;
-
-            if ( '' !== $new_tenant ) {
-                cloudsync_opt_set( 'cloudsync_sharepoint_tenant_id', $new_tenant );
-            }
+        // Client ID
+        if ( '' !== $client_id ) {
+            $settings[ $client_id_key ] = $client_id;
+        } elseif ( ! isset( $settings[ $client_id_key ] ) || '' === $settings[ $client_id_key ] ) {
+            throw new Exception( 'Client ID es obligatorio.' );
         }
 
-        if ( '' !== $new_refresh ) {
-            $settings[ $token_key ] = $new_refresh;
-        } elseif ( isset( $settings[ $token_key ] ) ) {
-            // Mantener el token existente si no se proporciona uno nuevo
-        } else {
-            $settings[ $token_key ] = '';
+        // Client Secret
+        if ( '' !== $client_secret ) {
+            $settings[ $client_secret_key ] = $client_secret;
+        } elseif ( ! isset( $settings[ $client_secret_key ] ) || '' === $settings[ $client_secret_key ] ) {
+            throw new Exception( 'Client Secret es obligatorio.' );
         }
 
+        // Refresh Token (opcional)
+        if ( '' !== $refresh_token ) {
+            $settings[ $token_key ] = $refresh_token;
+        }
+
+        // SharePoint Tenant ID
+        if ( 'sharepoint' === $service && '' !== $tenant_id ) {
+            $settings['sharepoint_tenant_id'] = $tenant_id;
+        }
+
+        // Guardar settings (cloudsync_save_settings encriptará los campos sensibles)
         cloudsync_save_settings( $settings );
 
-        // Guardar opciones individuales (con encriptación)
-        try {
-            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_id', $new_client_id );
+        // También guardar en opciones individuales para compatibilidad
+        cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_id', $settings[ $client_id_key ] );
 
-            if ( '' !== $new_client_secret ) {
-                cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_secret', cloudsync_encrypt( $new_client_secret ) );
-            }
-
-            if ( '' !== $new_refresh ) {
-                cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_refresh_token', cloudsync_encrypt( $new_refresh ) );
-            }
-        } catch ( Exception $encryption_error ) {
-            error_log( '[CloudSync] Encryption error: ' . $encryption_error->getMessage() );
-            throw new Exception( 'Error al encriptar las credenciales.' );
+        if ( '' !== $client_secret ) {
+            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_secret', cloudsync_encrypt( $client_secret ) );
         }
 
-        error_log( sprintf( '[CloudSync] Credentials stored for %s (client:%s, secret_updated:%s, token_updated:%s)', $service, '' === $client_id ? 'kept' : 'updated', '' === $client_secret ? 'kept' : 'updated', '' === $refresh_token ? ( '' === $current_refresh ? 'none' : 'kept' ) : 'updated' ) );
+        if ( '' !== $refresh_token ) {
+            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_refresh_token', cloudsync_encrypt( $refresh_token ) );
+        }
+
+        if ( 'sharepoint' === $service && '' !== $tenant_id ) {
+            cloudsync_opt_set( 'cloudsync_sharepoint_tenant_id', $tenant_id );
+        }
+
+        error_log( sprintf( '[CloudSync] Credentials stored for %s (client_id:%s, secret:%s, token:%s)', $service, '' !== $client_id ? 'updated' : 'kept', '' !== $client_secret ? 'updated' : 'kept', '' !== $refresh_token ? 'updated' : 'kept' ) );
 
         cloudsync_notice_success( '✅ Credenciales guardadas correctamente.' );
         error_log( sprintf( '[CloudSync] Credentials saved for %s.', $service ) );

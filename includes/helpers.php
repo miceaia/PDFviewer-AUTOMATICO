@@ -371,33 +371,64 @@ function cloudsync_store_service_credentials( $service, array $values, $preserve
 /**
  * Synchronises the legacy aggregated option with per-service credentials.
  *
+ * FIX: Obtiene valores YA ENCRIPTADOS directamente de las opciones para evitar doble encriptación.
+ * No debe usar cloudsync_get_service_credentials() que desencripta los valores.
+ *
  * @since 4.3.0
  *
  * @return void
  */
 function cloudsync_refresh_legacy_settings_cache() {
-    $google     = cloudsync_get_service_credentials( 'google', false );
-    $dropbox    = cloudsync_get_service_credentials( 'dropbox', false );
-    $sharepoint = cloudsync_get_service_credentials( 'sharepoint', false );
+    $map = cloudsync_get_service_option_map();
 
-    $data = array(
-        'google_client_id'         => $google['client_id'] ?? '',
-        'google_client_secret'     => ! empty( $google['client_secret'] ) ? cloudsync_encrypt( $google['client_secret'] ) : '',
-        'google_refresh_token'     => ! empty( $google['refresh_token'] ) ? cloudsync_encrypt( $google['refresh_token'] ) : '',
-        'google_access_token'      => ! empty( $google['access_token'] ) ? cloudsync_encrypt( $google['access_token'] ) : '',
-        'google_token_expires'     => $google['token_expires'] ?? 0,
-        'dropbox_client_id'        => $dropbox['client_id'] ?? '',
-        'dropbox_client_secret'    => ! empty( $dropbox['client_secret'] ) ? cloudsync_encrypt( $dropbox['client_secret'] ) : '',
-        'dropbox_refresh_token'    => ! empty( $dropbox['refresh_token'] ) ? cloudsync_encrypt( $dropbox['refresh_token'] ) : '',
-        'dropbox_access_token'     => ! empty( $dropbox['access_token'] ) ? cloudsync_encrypt( $dropbox['access_token'] ) : '',
-        'dropbox_token_expires'    => $dropbox['token_expires'] ?? 0,
-        'sharepoint_client_id'     => $sharepoint['client_id'] ?? '',
-        'sharepoint_secret'        => ! empty( $sharepoint['client_secret'] ) ? cloudsync_encrypt( $sharepoint['client_secret'] ) : '',
-        'sharepoint_tenant_id'     => $sharepoint['tenant_id'] ?? '',
-        'sharepoint_refresh_token' => ! empty( $sharepoint['refresh_token'] ) ? cloudsync_encrypt( $sharepoint['refresh_token'] ) : '',
-        'sharepoint_access_token'  => ! empty( $sharepoint['access_token'] ) ? cloudsync_encrypt( $sharepoint['access_token'] ) : '',
-        'sharepoint_token_expires' => $sharepoint['token_expires'] ?? 0,
-    );
+    // Obtener valores ENCRIPTADOS directamente de las opciones (sin desencriptar)
+    $data = array();
+
+    // Google Drive
+    foreach ( $map['google']['fields'] as $field => $suffix ) {
+        $option_name = $map['google']['prefix'] . '_' . $suffix;
+        $stored      = cloudsync_opt_get( $option_name, '' );
+        $legacy_key  = 'google_' . ( 'client_secret' === $field ? 'client_secret' : ( 'client_id' === $field ? 'client_id' : ( 'refresh_token' === $field ? 'refresh_token' : ( 'access_token' === $field ? 'access_token' : ( 'token_expires' === $field ? 'token_expires' : $field ) ) ) ) );
+
+        if ( 'token_expires' === $field ) {
+            $data[ $legacy_key ] = (int) $stored;
+        } else {
+            $data[ $legacy_key ] = $stored; // Ya está encriptado si es sensible
+        }
+    }
+
+    // Dropbox
+    foreach ( $map['dropbox']['fields'] as $field => $suffix ) {
+        $option_name = $map['dropbox']['prefix'] . '_' . $suffix;
+        $stored      = cloudsync_opt_get( $option_name, '' );
+        $legacy_key  = 'dropbox_' . ( 'client_secret' === $field ? 'client_secret' : ( 'client_id' === $field ? 'client_id' : ( 'refresh_token' === $field ? 'refresh_token' : ( 'access_token' === $field ? 'access_token' : ( 'token_expires' === $field ? 'token_expires' : $field ) ) ) ) );
+
+        if ( 'token_expires' === $field ) {
+            $data[ $legacy_key ] = (int) $stored;
+        } else {
+            $data[ $legacy_key ] = $stored; // Ya está encriptado si es sensible
+        }
+    }
+
+    // SharePoint
+    foreach ( $map['sharepoint']['fields'] as $field => $suffix ) {
+        $option_name = $map['sharepoint']['prefix'] . '_' . $suffix;
+        $stored      = cloudsync_opt_get( $option_name, '' );
+
+        if ( 'client_secret' === $field ) {
+            $legacy_key = 'sharepoint_secret';
+        } elseif ( 'tenant_id' === $field ) {
+            $legacy_key = 'sharepoint_tenant_id';
+        } else {
+            $legacy_key = 'sharepoint_' . $field;
+        }
+
+        if ( 'token_expires' === $field ) {
+            $data[ $legacy_key ] = (int) $stored;
+        } else {
+            $data[ $legacy_key ] = $stored; // Ya está encriptado si es sensible
+        }
+    }
 
     cloudsync_opt_set( 'cloudsync_settings', $data );
 }

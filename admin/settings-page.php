@@ -30,16 +30,20 @@ $settings = cloudsync_get_settings();
                     <td><input name="cloudsync_settings[google_refresh_token]" type="text" id="google_refresh_token" value="<?php echo esc_attr( $settings['google_refresh_token'] ); ?>" class="regular-text" /></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="dropbox_app_key"><?php esc_html_e( 'Dropbox App Key', 'secure-pdf-viewer' ); ?></label></th>
-                    <td><input name="cloudsync_settings[dropbox_app_key]" type="text" id="dropbox_app_key" value="<?php echo esc_attr( $settings['dropbox_app_key'] ); ?>" class="regular-text" /></td>
+                    <th scope="row"><label for="dropbox_client_id"><?php esc_html_e( 'Dropbox Client ID', 'secure-pdf-viewer' ); ?></label></th>
+                    <td><input name="cloudsync_settings[dropbox_client_id]" type="text" id="dropbox_client_id" value="<?php echo esc_attr( $settings['dropbox_client_id'] ); ?>" class="regular-text" /></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="dropbox_app_secret"><?php esc_html_e( 'Dropbox App Secret', 'secure-pdf-viewer' ); ?></label></th>
-                    <td><input name="cloudsync_settings[dropbox_app_secret]" type="text" id="dropbox_app_secret" value="<?php echo esc_attr( $settings['dropbox_app_secret'] ); ?>" class="regular-text" /></td>
+                    <th scope="row"><label for="dropbox_client_secret"><?php esc_html_e( 'Dropbox Client Secret', 'secure-pdf-viewer' ); ?></label></th>
+                    <td><input name="cloudsync_settings[dropbox_client_secret]" type="text" id="dropbox_client_secret" value="<?php echo esc_attr( $settings['dropbox_client_secret'] ); ?>" class="regular-text" /></td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="dropbox_refresh_token"><?php esc_html_e( 'Dropbox Refresh Token', 'secure-pdf-viewer' ); ?></label></th>
                     <td><input name="cloudsync_settings[dropbox_refresh_token]" type="text" id="dropbox_refresh_token" value="<?php echo esc_attr( $settings['dropbox_refresh_token'] ); ?>" class="regular-text" /></td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="sharepoint_tenant_id"><?php esc_html_e( 'SharePoint Tenant ID', 'secure-pdf-viewer' ); ?></label></th>
+                    <td><input name="cloudsync_settings[sharepoint_tenant_id]" type="text" id="sharepoint_tenant_id" value="<?php echo esc_attr( $settings['sharepoint_tenant_id'] ); ?>" class="regular-text" /></td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="sharepoint_client_id"><?php esc_html_e( 'SharePoint Client ID', 'secure-pdf-viewer' ); ?></label></th>

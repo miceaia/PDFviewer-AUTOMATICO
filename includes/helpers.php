@@ -27,29 +27,22 @@ if ( ! function_exists( 'cloudsync_encrypt' ) ) {
         }
 
         if ( ! function_exists( 'openssl_encrypt' ) ) {
-            error_log( '[CloudSync] Warning: OpenSSL not available, storing credentials in plain text.' );
+            static $logged = false;
+
+            if ( ! $logged ) {
+                error_log( '[CloudSync] OpenSSL extension unavailable. Storing credential without encryption.' );
+                $logged = true;
+            }
+
             return $plain;
         }
 
-        try {
-            $key = hash( 'sha256', wp_salt( 'auth' ), true );
-            $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+        $key = hash( 'sha256', wp_salt( 'auth' ), true );
+        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
 
-            if ( strlen( $iv ) < 16 ) {
-                throw new Exception( 'IV length is insufficient.' );
-            }
+        $encrypted = openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
 
-            $encrypted = openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
-
-            if ( false === $encrypted ) {
-                throw new Exception( 'Encryption failed.' );
-            }
-
-            return $encrypted;
-        } catch ( Exception $e ) {
-            error_log( '[CloudSync] Encryption error: ' . $e->getMessage() );
-            return $plain;
-        }
+        return $encrypted ? $encrypted : $plain;
     }
 }
 
@@ -69,41 +62,36 @@ if ( ! function_exists( 'cloudsync_decrypt' ) ) {
         }
 
         if ( ! function_exists( 'openssl_decrypt' ) ) {
+            static $logged = false;
+
+            if ( ! $logged ) {
+                error_log( '[CloudSync] OpenSSL extension unavailable. Returning stored credential verbatim.' );
+                $logged = true;
+            }
+
             return $cipher;
         }
 
-        try {
-            $key = hash( 'sha256', wp_salt( 'auth' ), true );
-            $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+        $key = hash( 'sha256', wp_salt( 'auth' ), true );
+        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
 
-            if ( strlen( $iv ) < 16 ) {
-                throw new Exception( 'IV length is insufficient.' );
-            }
+        $decrypted = openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
 
-            $decrypted = openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
-
-            if ( false !== $decrypted ) {
-                return $decrypted;
-            }
-
-            // Intento de fallback con base64
-            $decoded = base64_decode( $cipher, true );
-
-            if ( false !== $decoded ) {
-                $fallback = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
-
-                if ( false !== $fallback ) {
-                    return $fallback;
-                }
-            }
-
-            // Si todo falla, devolver el texto original
-            error_log( '[CloudSync] Warning: Failed to decrypt value, returning as-is.' );
-            return $cipher;
-        } catch ( Exception $e ) {
-            error_log( '[CloudSync] Decryption error: ' . $e->getMessage() );
-            return $cipher;
+        if ( false !== $decrypted ) {
+            return $decrypted;
         }
+
+        $decoded = base64_decode( $cipher, true );
+
+        if ( false !== $decoded ) {
+            $fallback = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
+
+            if ( false !== $fallback ) {
+                return $fallback;
+            }
+        }
+
+        return $cipher;
     }
 }
 
@@ -178,6 +166,243 @@ if ( ! function_exists( 'cloudsync_notice_error' ) ) {
 }
 
 /**
+ * Returns the internal service → option mapping used for credential storage.
+ *
+ * @since 4.3.0
+ *
+ * @return array<string, array<string, mixed>>
+ */
+function cloudsync_get_service_option_map() {
+    return array(
+        'google'     => array(
+            'prefix'            => 'cloudsync_drive',
+            'fields'            => array(
+                'client_id'     => 'client_id',
+                'client_secret' => 'client_secret',
+                'refresh_token' => 'refresh_token',
+                'access_token'  => 'access_token',
+                'token_expires' => 'token_expires',
+            ),
+            'sensitive_fields' => array( 'client_secret', 'refresh_token', 'access_token' ),
+            'preserve_on_empty'=> array( 'client_id', 'client_secret', 'refresh_token', 'access_token' ),
+        ),
+        'dropbox'    => array(
+            'prefix'            => 'cloudsync_dropbox',
+            'fields'            => array(
+                'client_id'     => 'client_id',
+                'client_secret' => 'client_secret',
+                'refresh_token' => 'refresh_token',
+                'access_token'  => 'access_token',
+                'token_expires' => 'token_expires',
+            ),
+            'sensitive_fields' => array( 'client_secret', 'refresh_token', 'access_token' ),
+            'preserve_on_empty'=> array( 'client_id', 'client_secret', 'refresh_token', 'access_token' ),
+        ),
+        'sharepoint' => array(
+            'prefix'            => 'cloudsync_sharepoint',
+            'fields'            => array(
+                'client_id'     => 'client_id',
+                'client_secret' => 'client_secret',
+                'tenant_id'     => 'tenant_id',
+                'refresh_token' => 'refresh_token',
+                'access_token'  => 'access_token',
+                'token_expires' => 'token_expires',
+            ),
+            'sensitive_fields' => array( 'client_secret', 'refresh_token', 'access_token' ),
+            'preserve_on_empty'=> array( 'client_id', 'client_secret', 'tenant_id', 'refresh_token', 'access_token' ),
+        ),
+    );
+}
+
+/**
+ * Retrieves decrypted credentials for a given service.
+ *
+ * @since 4.3.0
+ *
+ * @param string $service              Service slug (google, dropbox, sharepoint).
+ * @param bool   $use_legacy_fallback  Whether to hydrate empty values from legacy settings.
+ *
+ * @return array<string, mixed>
+ */
+function cloudsync_get_service_credentials( $service, $use_legacy_fallback = true ) {
+    $map = cloudsync_get_service_option_map();
+
+    if ( ! isset( $map[ $service ] ) ) {
+        return array();
+    }
+
+    $fields    = $map[ $service ]['fields'];
+    $sensitive = $map[ $service ]['sensitive_fields'];
+    $credentials = array();
+
+    foreach ( $fields as $field => $suffix ) {
+        $option_name = $map[ $service ]['prefix'] . '_' . $suffix;
+        $stored      = cloudsync_opt_get( $option_name, '' );
+
+        if ( in_array( $field, $sensitive, true ) && '' !== $stored ) {
+            $credentials[ $field ] = cloudsync_decrypt( $stored );
+        } elseif ( 'token_expires' === $field ) {
+            $credentials[ $field ] = (int) $stored;
+        } else {
+            $credentials[ $field ] = is_string( $stored ) ? $stored : '';
+        }
+    }
+
+    if ( $use_legacy_fallback ) {
+        $legacy = cloudsync_opt_get( 'cloudsync_settings', array() );
+
+        if ( is_array( $legacy ) && ! empty( $legacy ) ) {
+            $legacy_sensitive = array(
+                'google_client_secret',
+                'google_refresh_token',
+                'dropbox_app_secret',
+                'dropbox_client_secret',
+                'dropbox_refresh_token',
+                'sharepoint_secret',
+                'sharepoint_refresh_token',
+            );
+
+            foreach ( $fields as $field => $suffix ) {
+                if ( ! empty( $credentials[ $field ] ) ) {
+                    continue;
+                }
+
+                $legacy_key = '';
+
+                switch ( $service ) {
+                    case 'google':
+                        $legacy_key = 'google_' . ( 'client_id' === $field ? 'client_id' : ( 'client_secret' === $field ? 'client_secret' : ( 'refresh_token' === $field ? 'refresh_token' : $field ) ) );
+                        break;
+                    case 'dropbox':
+                        if ( 'client_id' === $field ) {
+                            $legacy_key = isset( $legacy['dropbox_client_id'] ) ? 'dropbox_client_id' : 'dropbox_app_key';
+                        } elseif ( 'client_secret' === $field ) {
+                            $legacy_key = isset( $legacy['dropbox_client_secret'] ) ? 'dropbox_client_secret' : 'dropbox_app_secret';
+                        } elseif ( 'refresh_token' === $field ) {
+                            $legacy_key = 'dropbox_refresh_token';
+                        }
+                        break;
+                    case 'sharepoint':
+                        if ( 'tenant_id' === $field ) {
+                            $legacy_key = 'sharepoint_tenant_id';
+                        } elseif ( in_array( $field, array( 'client_id', 'client_secret', 'refresh_token' ), true ) ) {
+                            $legacy_key = 'sharepoint_' . ( 'client_id' === $field ? 'client_id' : ( 'client_secret' === $field ? 'secret' : 'refresh_token' ) );
+                        }
+                        break;
+                }
+
+                if ( ! $legacy_key || ! isset( $legacy[ $legacy_key ] ) ) {
+                    continue;
+                }
+
+                $value = $legacy[ $legacy_key ];
+
+                if ( in_array( $legacy_key, $legacy_sensitive, true ) && '' !== $value ) {
+                    $value = cloudsync_decrypt( $value );
+                }
+
+                if ( 'token_expires' === $field ) {
+                    $value = (int) $value;
+                }
+
+                $credentials[ $field ] = $value;
+            }
+        }
+    }
+
+    return $credentials;
+}
+
+/**
+ * Persists credential fields for a service.
+ *
+ * @since 4.3.0
+ *
+ * @param string               $service        Service slug.
+ * @param array<string, mixed> $values         Values to store (plain text; encryption is handled internally).
+ * @param bool                 $preserve_empty Whether to keep existing values when the provided field is empty.
+ *
+ * @return void
+ */
+function cloudsync_store_service_credentials( $service, array $values, $preserve_empty = true ) {
+    $map = cloudsync_get_service_option_map();
+
+    if ( ! isset( $map[ $service ] ) ) {
+        return;
+    }
+
+    $fields            = $map[ $service ]['fields'];
+    $sensitive_fields  = $map[ $service ]['sensitive_fields'];
+    $preserve_on_empty = isset( $map[ $service ]['preserve_on_empty'] ) ? $map[ $service ]['preserve_on_empty'] : array();
+    $current           = cloudsync_get_service_credentials( $service, false );
+
+    foreach ( $fields as $field => $suffix ) {
+        $option_name = $map[ $service ]['prefix'] . '_' . $suffix;
+        $value       = $current[ $field ] ?? '';
+
+        if ( array_key_exists( $field, $values ) ) {
+            $candidate = $values[ $field ];
+
+            if ( is_string( $candidate ) ) {
+                $candidate = trim( $candidate );
+            }
+
+            if ( '' === $candidate && $preserve_empty && in_array( $field, $preserve_on_empty, true ) ) {
+                // Keep the previous value when empty strings are submitted.
+                $value = $current[ $field ] ?? '';
+            } else {
+                $value = $candidate;
+            }
+        }
+
+        if ( in_array( $field, $sensitive_fields, true ) ) {
+            $stored = '' === $value ? '' : cloudsync_encrypt( (string) $value );
+            cloudsync_opt_set( $option_name, $stored );
+        } elseif ( 'token_expires' === $field ) {
+            cloudsync_opt_set( $option_name, (int) $value );
+        } else {
+            cloudsync_opt_set( $option_name, $value );
+        }
+    }
+
+    cloudsync_refresh_legacy_settings_cache();
+}
+
+/**
+ * Synchronises the legacy aggregated option with per-service credentials.
+ *
+ * @since 4.3.0
+ *
+ * @return void
+ */
+function cloudsync_refresh_legacy_settings_cache() {
+    $google     = cloudsync_get_service_credentials( 'google', false );
+    $dropbox    = cloudsync_get_service_credentials( 'dropbox', false );
+    $sharepoint = cloudsync_get_service_credentials( 'sharepoint', false );
+
+    $data = array(
+        'google_client_id'         => $google['client_id'] ?? '',
+        'google_client_secret'     => ! empty( $google['client_secret'] ) ? cloudsync_encrypt( $google['client_secret'] ) : '',
+        'google_refresh_token'     => ! empty( $google['refresh_token'] ) ? cloudsync_encrypt( $google['refresh_token'] ) : '',
+        'google_access_token'      => ! empty( $google['access_token'] ) ? cloudsync_encrypt( $google['access_token'] ) : '',
+        'google_token_expires'     => $google['token_expires'] ?? 0,
+        'dropbox_client_id'        => $dropbox['client_id'] ?? '',
+        'dropbox_client_secret'    => ! empty( $dropbox['client_secret'] ) ? cloudsync_encrypt( $dropbox['client_secret'] ) : '',
+        'dropbox_refresh_token'    => ! empty( $dropbox['refresh_token'] ) ? cloudsync_encrypt( $dropbox['refresh_token'] ) : '',
+        'dropbox_access_token'     => ! empty( $dropbox['access_token'] ) ? cloudsync_encrypt( $dropbox['access_token'] ) : '',
+        'dropbox_token_expires'    => $dropbox['token_expires'] ?? 0,
+        'sharepoint_client_id'     => $sharepoint['client_id'] ?? '',
+        'sharepoint_secret'        => ! empty( $sharepoint['client_secret'] ) ? cloudsync_encrypt( $sharepoint['client_secret'] ) : '',
+        'sharepoint_tenant_id'     => $sharepoint['tenant_id'] ?? '',
+        'sharepoint_refresh_token' => ! empty( $sharepoint['refresh_token'] ) ? cloudsync_encrypt( $sharepoint['refresh_token'] ) : '',
+        'sharepoint_access_token'  => ! empty( $sharepoint['access_token'] ) ? cloudsync_encrypt( $sharepoint['access_token'] ) : '',
+        'sharepoint_token_expires' => $sharepoint['token_expires'] ?? 0,
+    );
+
+    cloudsync_opt_set( 'cloudsync_settings', $data );
+}
+
+/**
  * Retrieves the cloud sync settings option.
  *
  * @since 4.0.0
@@ -189,37 +414,47 @@ function cloudsync_get_settings() {
         'google_client_id'         => '',
         'google_client_secret'     => '',
         'google_refresh_token'     => '',
-        'dropbox_app_key'          => '',
-        'dropbox_app_secret'       => '',
+        'google_access_token'      => '',
+        'google_token_expires'     => 0,
+        'dropbox_client_id'        => '',
+        'dropbox_client_secret'    => '',
         'dropbox_refresh_token'    => '',
+        'dropbox_access_token'     => '',
+        'dropbox_token_expires'    => 0,
         'sharepoint_client_id'     => '',
         'sharepoint_secret'        => '',
         'sharepoint_tenant_id'     => '',
         'sharepoint_refresh_token' => '',
+        'sharepoint_access_token'  => '',
+        'sharepoint_token_expires' => 0,
     );
 
-    $settings = cloudsync_opt_get( 'cloudsync_settings', array() );
+    $settings = $defaults;
 
-    if ( empty( $settings ) || ! is_array( $settings ) ) {
-        return $defaults;
-    }
+    $google = cloudsync_get_service_credentials( 'google' );
 
-    $settings = array_merge( $defaults, $settings );
+    $settings['google_client_id']     = $google['client_id'] ?? '';
+    $settings['google_client_secret'] = $google['client_secret'] ?? '';
+    $settings['google_refresh_token'] = $google['refresh_token'] ?? '';
+    $settings['google_access_token']  = $google['access_token'] ?? '';
+    $settings['google_token_expires'] = isset( $google['token_expires'] ) ? (int) $google['token_expires'] : 0;
 
-    $sensitive_fields = array(
-        'google_client_secret',
-        'google_refresh_token',
-        'dropbox_app_secret',
-        'dropbox_refresh_token',
-        'sharepoint_secret',
-        'sharepoint_refresh_token',
-    );
+    $dropbox = cloudsync_get_service_credentials( 'dropbox' );
 
-    foreach ( $sensitive_fields as $key ) {
-        if ( ! empty( $settings[ $key ] ) ) {
-            $settings[ $key ] = cloudsync_decrypt( $settings[ $key ] );
-        }
-    }
+    $settings['dropbox_client_id']     = $dropbox['client_id'] ?? '';
+    $settings['dropbox_client_secret'] = $dropbox['client_secret'] ?? '';
+    $settings['dropbox_refresh_token'] = $dropbox['refresh_token'] ?? '';
+    $settings['dropbox_access_token']  = $dropbox['access_token'] ?? '';
+    $settings['dropbox_token_expires'] = isset( $dropbox['token_expires'] ) ? (int) $dropbox['token_expires'] : 0;
+
+    $sharepoint = cloudsync_get_service_credentials( 'sharepoint' );
+
+    $settings['sharepoint_client_id']     = $sharepoint['client_id'] ?? '';
+    $settings['sharepoint_secret']        = $sharepoint['client_secret'] ?? '';
+    $settings['sharepoint_tenant_id']     = $sharepoint['tenant_id'] ?? '';
+    $settings['sharepoint_refresh_token'] = $sharepoint['refresh_token'] ?? '';
+    $settings['sharepoint_access_token']  = $sharepoint['access_token'] ?? '';
+    $settings['sharepoint_token_expires'] = isset( $sharepoint['token_expires'] ) ? (int) $sharepoint['token_expires'] : 0;
 
     return $settings;
 }
@@ -276,26 +511,43 @@ function cloudsync_save_general_settings( $settings ) {
  */
 function cloudsync_save_settings( $settings ) {
     if ( ! is_array( $settings ) ) {
-        error_log( '[CloudSync] save_settings: Invalid settings format (not an array).' );
         return;
     }
 
-    $sensitive_fields = array(
-        'google_client_secret',
-        'google_refresh_token',
-        'dropbox_app_secret',
-        'dropbox_refresh_token',
-        'sharepoint_secret',
-        'sharepoint_refresh_token',
+    $service_map = array(
+        'google'     => array(
+            'client_id'     => 'google_client_id',
+            'client_secret' => 'google_client_secret',
+            'refresh_token' => 'google_refresh_token',
+        ),
+        'dropbox'    => array(
+            'client_id'     => 'dropbox_client_id',
+            'client_secret' => 'dropbox_client_secret',
+            'refresh_token' => 'dropbox_refresh_token',
+        ),
+        'sharepoint' => array(
+            'client_id'     => 'sharepoint_client_id',
+            'client_secret' => 'sharepoint_secret',
+            'tenant_id'     => 'sharepoint_tenant_id',
+            'refresh_token' => 'sharepoint_refresh_token',
+        ),
     );
 
-    foreach ( $sensitive_fields as $key ) {
-        if ( isset( $settings[ $key ] ) && '' !== $settings[ $key ] && is_string( $settings[ $key ] ) ) {
-            $settings[ $key ] = cloudsync_encrypt( $settings[ $key ] );
+    foreach ( $service_map as $service => $fields ) {
+        $values = array();
+
+        foreach ( $fields as $field => $legacy_key ) {
+            if ( array_key_exists( $legacy_key, $settings ) ) {
+                $values[ $field ] = $settings[ $legacy_key ];
+            }
+        }
+
+        if ( ! empty( $values ) ) {
+            cloudsync_store_service_credentials( $service, $values );
         }
     }
 
-    cloudsync_opt_set( 'cloudsync_settings', $settings );
+    cloudsync_refresh_legacy_settings_cache();
 }
 
 /**
@@ -334,14 +586,14 @@ function cloudsync_get_service_definitions() {
         'dropbox'    => array(
             'label'       => __( 'Dropbox', 'secure-pdf-viewer' ),
             'token_field' => 'dropbox_refresh_token',
-            'required_fields' => array( 'dropbox_app_key', 'dropbox_app_secret' ),
+            'required_fields' => array( 'dropbox_client_id', 'dropbox_client_secret' ),
             'fields'      => array(
-                'dropbox_app_key'       => array(
-                    'label'     => __( 'App Key', 'secure-pdf-viewer' ),
+                'dropbox_client_id'     => array(
+                    'label'     => __( 'App Key / Client ID', 'secure-pdf-viewer' ),
                     'sensitive' => false,
                 ),
-                'dropbox_app_secret'    => array(
-                    'label'     => __( 'App Secret', 'secure-pdf-viewer' ),
+                'dropbox_client_secret' => array(
+                    'label'     => __( 'App Secret / Client Secret', 'secure-pdf-viewer' ),
                     'sensitive' => true,
                 ),
                 'dropbox_refresh_token' => array(

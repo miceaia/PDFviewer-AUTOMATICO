@@ -169,20 +169,28 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                 </form>
             <?php elseif ( 'oauth' === $active_tab ) : ?>
                 <?php
-                $drive_connected      = ! empty( $oauth_settings['google_refresh_token'] );
-                $dropbox_connected    = ! empty( $oauth_settings['dropbox_refresh_token'] );
-                $sharepoint_connected = ! empty( $oauth_settings['sharepoint_refresh_token'] );
+                $service_credentials = array(
+                    'google'     => cloudsync_get_service_credentials( 'google' ),
+                    'dropbox'    => cloudsync_get_service_credentials( 'dropbox' ),
+                    'sharepoint' => cloudsync_get_service_credentials( 'sharepoint' ),
+                );
 
-                $drive_connect_url   = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_oauth_connect&service=drive' ), 'cloudsync_credentials_nonce' );
-                $drive_revoke_url    = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_access&service=drive' ), 'cloudsync_credentials_nonce' );
-                $dropbox_revoke_url  = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_access&service=dropbox' ), 'cloudsync_credentials_nonce' );
-                $share_revoke_url    = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_access&service=sharepoint' ), 'cloudsync_credentials_nonce' );
+                $drive_connected      = ! empty( $service_credentials['google']['refresh_token'] );
+                $dropbox_connected    = ! empty( $service_credentials['dropbox']['refresh_token'] );
+                $sharepoint_connected = ! empty( $service_credentials['sharepoint']['refresh_token'] );
 
-                $drive_secret_placeholder      = $oauth_settings['google_client_secret'] ? str_repeat( '•', 8 ) : '';
-                $drive_refresh_placeholder     = $drive_connected ? str_repeat( '•', 8 ) : '';
-                $dropbox_secret_placeholder    = $oauth_settings['dropbox_app_secret'] ? str_repeat( '•', 8 ) : '';
-                $dropbox_refresh_placeholder   = $dropbox_connected ? str_repeat( '•', 8 ) : '';
-                $sharepoint_secret_placeholder = $oauth_settings['sharepoint_secret'] ? str_repeat( '•', 8 ) : '';
+                $drive_connect_url  = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_oauth_connect&service=google' ), 'cloudsync_credentials_nonce' );
+                $drive_revoke_url   = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_credentials&service=google' ), 'cloudsync_credentials_nonce' );
+                $dropbox_connect_url = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_oauth_connect&service=dropbox' ), 'cloudsync_credentials_nonce' );
+                $dropbox_revoke_url = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_credentials&service=dropbox' ), 'cloudsync_credentials_nonce' );
+                $share_connect_url  = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_oauth_connect&service=sharepoint' ), 'cloudsync_credentials_nonce' );
+                $share_revoke_url   = wp_nonce_url( admin_url( 'admin-post.php?action=cloudsync_revoke_credentials&service=sharepoint' ), 'cloudsync_credentials_nonce' );
+
+                $drive_secret_placeholder       = ! empty( $service_credentials['google']['client_secret'] ) ? str_repeat( '•', 8 ) : '';
+                $drive_refresh_placeholder      = $drive_connected ? str_repeat( '•', 8 ) : '';
+                $dropbox_secret_placeholder     = ! empty( $service_credentials['dropbox']['client_secret'] ) ? str_repeat( '•', 8 ) : '';
+                $dropbox_refresh_placeholder    = $dropbox_connected ? str_repeat( '•', 8 ) : '';
+                $sharepoint_secret_placeholder  = ! empty( $service_credentials['sharepoint']['client_secret'] ) ? str_repeat( '•', 8 ) : '';
                 $sharepoint_refresh_placeholder = $sharepoint_connected ? str_repeat( '•', 8 ) : '';
                 ?>
                 <div class="cloudsync-card">
@@ -199,10 +207,10 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                             <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" class="cloudsync-service-form">
                                 <?php wp_nonce_field( 'cloudsync_credentials_nonce' ); ?>
                                 <input type="hidden" name="action" value="cloudsync_save_credentials" />
-                                <input type="hidden" name="service" value="drive" />
+                                <input type="hidden" name="service" value="google" />
                                 <p class="cloudsync-service-field">
                                     <label for="cloudsync-drive-client-id"><?php esc_html_e( 'Client ID', 'secure-pdf-viewer' ); ?></label>
-                                    <input type="text" class="regular-text" id="cloudsync-drive-client-id" name="client_id" value="<?php echo esc_attr( $oauth_settings['google_client_id'] ); ?>" autocomplete="off" />
+                                    <input type="text" class="regular-text" id="cloudsync-drive-client-id" name="client_id" value="<?php echo esc_attr( $service_credentials['google']['client_id'] ?? '' ); ?>" autocomplete="off" />
                                 </p>
                                 <p class="cloudsync-service-field">
                                     <label for="cloudsync-drive-client-secret"><?php esc_html_e( 'Client Secret', 'secure-pdf-viewer' ); ?></label>
@@ -214,7 +222,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                                 </p>
                                 <div class="cloudsync-actions">
                                     <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
-                                    <a class="button" href="<?php echo esc_url( $drive_connect_url ); ?>" onclick="return cloudsyncOAuthPopup( this.href );"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></a>
+                                    <button type="button" class="button js-cloudsync-connect" data-oauth-url="<?php echo esc_url( $drive_connect_url ); ?>"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
                                     <a class="button-link-delete" href="<?php echo esc_url( $drive_revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
                                     <?php if ( isset( $connection_guides['google'] ) ) : ?>
                                         <button type="button" class="button button-link js-cloudsync-guide" data-service="google"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
@@ -235,11 +243,11 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                                 <input type="hidden" name="action" value="cloudsync_save_credentials" />
                                 <input type="hidden" name="service" value="dropbox" />
                                 <p class="cloudsync-service-field">
-                                    <label for="cloudsync-dropbox-key"><?php esc_html_e( 'App Key', 'secure-pdf-viewer' ); ?></label>
-                                    <input type="text" class="regular-text" id="cloudsync-dropbox-key" name="client_id" value="<?php echo esc_attr( $oauth_settings['dropbox_app_key'] ); ?>" autocomplete="off" />
+                                    <label for="cloudsync-dropbox-key"><?php esc_html_e( 'App Key / Client ID', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="text" class="regular-text" id="cloudsync-dropbox-key" name="client_id" value="<?php echo esc_attr( $service_credentials['dropbox']['client_id'] ?? '' ); ?>" autocomplete="off" />
                                 </p>
                                 <p class="cloudsync-service-field">
-                                    <label for="cloudsync-dropbox-secret"><?php esc_html_e( 'App Secret', 'secure-pdf-viewer' ); ?></label>
+                                    <label for="cloudsync-dropbox-secret"><?php esc_html_e( 'App Secret / Client Secret', 'secure-pdf-viewer' ); ?></label>
                                     <input type="password" class="regular-text" id="cloudsync-dropbox-secret" name="client_secret" placeholder="<?php echo esc_attr( $dropbox_secret_placeholder ); ?>" autocomplete="off" />
                                 </p>
                                 <p class="cloudsync-service-field">
@@ -248,7 +256,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                                 </p>
                                 <div class="cloudsync-actions">
                                     <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
-                                    <button type="button" class="button" disabled aria-disabled="true"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
+                                    <button type="button" class="button js-cloudsync-connect" data-oauth-url="<?php echo esc_url( $dropbox_connect_url ); ?>"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
                                     <a class="button-link-delete" href="<?php echo esc_url( $dropbox_revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
                                     <?php if ( isset( $connection_guides['dropbox'] ) ) : ?>
                                         <button type="button" class="button button-link js-cloudsync-guide" data-service="dropbox"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>
@@ -270,11 +278,11 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                                 <input type="hidden" name="service" value="sharepoint" />
                                 <p class="cloudsync-service-field">
                                     <label for="cloudsync-sharepoint-tenant"><?php esc_html_e( 'Tenant ID', 'secure-pdf-viewer' ); ?></label>
-                                    <input type="text" class="regular-text" id="cloudsync-sharepoint-tenant" name="tenant_id" value="<?php echo esc_attr( $oauth_settings['sharepoint_tenant_id'] ); ?>" autocomplete="off" />
+                                    <input type="text" class="regular-text" id="cloudsync-sharepoint-tenant" name="tenant_id" value="<?php echo esc_attr( $service_credentials['sharepoint']['tenant_id'] ?? '' ); ?>" autocomplete="off" />
                                 </p>
                                 <p class="cloudsync-service-field">
                                     <label for="cloudsync-sharepoint-client"><?php esc_html_e( 'Client ID', 'secure-pdf-viewer' ); ?></label>
-                                    <input type="text" class="regular-text" id="cloudsync-sharepoint-client" name="client_id" value="<?php echo esc_attr( $oauth_settings['sharepoint_client_id'] ); ?>" autocomplete="off" />
+                                    <input type="text" class="regular-text" id="cloudsync-sharepoint-client" name="client_id" value="<?php echo esc_attr( $service_credentials['sharepoint']['client_id'] ?? '' ); ?>" autocomplete="off" />
                                 </p>
                                 <p class="cloudsync-service-field">
                                     <label for="cloudsync-sharepoint-secret"><?php esc_html_e( 'Client Secret', 'secure-pdf-viewer' ); ?></label>
@@ -286,7 +294,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                                 </p>
                                 <div class="cloudsync-actions">
                                     <button type="submit" class="button button-primary"><?php esc_html_e( 'Guardar credenciales', 'secure-pdf-viewer' ); ?></button>
-                                    <button type="button" class="button" disabled aria-disabled="true"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
+                                    <button type="button" class="button js-cloudsync-connect" data-oauth-url="<?php echo esc_url( $share_connect_url ); ?>"><?php esc_html_e( 'Dar acceso', 'secure-pdf-viewer' ); ?></button>
                                     <a class="button-link-delete" href="<?php echo esc_url( $share_revoke_url ); ?>"><?php esc_html_e( 'Revocar acceso', 'secure-pdf-viewer' ); ?></a>
                                     <?php if ( isset( $connection_guides['sharepoint'] ) ) : ?>
                                         <button type="button" class="button button-link js-cloudsync-guide" data-service="sharepoint"><?php esc_html_e( 'Guía de conexión', 'secure-pdf-viewer' ); ?></button>

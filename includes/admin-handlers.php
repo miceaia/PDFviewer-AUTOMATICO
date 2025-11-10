@@ -92,100 +92,35 @@ function cloudsync_handle_save_credentials(): void {
 
         $service = isset( $_POST['service'] ) ? sanitize_key( wp_unslash( $_POST['service'] ) ) : '';
 
-        $service_map = array(
-            'drive'      => array(
-                'prefix'   => 'cloudsync_drive',
-                'settings' => array(
-                    'client_id'     => 'google_client_id',
-                    'client_secret' => 'google_client_secret',
-                    'refresh_token' => 'google_refresh_token',
-                ),
-            ),
-            'dropbox'    => array(
-                'prefix'   => 'cloudsync_dropbox',
-                'settings' => array(
-                    'client_id'     => 'dropbox_app_key',
-                    'client_secret' => 'dropbox_app_secret',
-                    'refresh_token' => 'dropbox_refresh_token',
-                ),
-            ),
-            'sharepoint' => array(
-                'prefix'   => 'cloudsync_sharepoint',
-                'settings' => array(
-                    'client_id'     => 'sharepoint_client_id',
-                    'client_secret' => 'sharepoint_secret',
-                    'refresh_token' => 'sharepoint_refresh_token',
-                ),
-            ),
-        );
+        $allowed_services = array( 'google', 'dropbox', 'sharepoint' );
 
-        if ( ! isset( $service_map[ $service ] ) ) {
+        if ( ! in_array( $service, $allowed_services, true ) ) {
             throw new Exception( 'Servicio inválido.' );
         }
 
-        $client_id     = isset( $_POST['client_id'] ) ? sanitize_text_field( wp_unslash( $_POST['client_id'] ) ) : '';
-        $client_secret = isset( $_POST['client_secret'] ) ? sanitize_text_field( wp_unslash( $_POST['client_secret'] ) ) : '';
-        $refresh_token = isset( $_POST['refresh_token'] ) ? sanitize_text_field( wp_unslash( $_POST['refresh_token'] ) ) : '';
-        $tenant_id     = isset( $_POST['tenant_id'] ) ? sanitize_text_field( wp_unslash( $_POST['tenant_id'] ) ) : '';
+        $updates = array(
+            'client_id'     => isset( $_POST['client_id'] ) ? sanitize_text_field( wp_unslash( $_POST['client_id'] ) ) : '',
+            'client_secret' => isset( $_POST['client_secret'] ) ? sanitize_text_field( wp_unslash( $_POST['client_secret'] ) ) : '',
+            'refresh_token' => isset( $_POST['refresh_token'] ) ? sanitize_text_field( wp_unslash( $_POST['refresh_token'] ) ) : '',
+        );
 
-        $client_id_key     = $service_map[ $service ]['settings']['client_id'];
-        $client_secret_key = $service_map[ $service ]['settings']['client_secret'];
-        $token_key         = $service_map[ $service ]['settings']['refresh_token'];
-
-        // SOLUCIÓN AL BUG DE DOBLE ENCRIPTACIÓN:
-        // Leer settings actuales DESENCRIPTADOS
-        $settings = cloudsync_get_settings();
-
-        if ( ! is_array( $settings ) ) {
-            $settings = array();
+        if ( 'sharepoint' === $service ) {
+            $updates['tenant_id'] = isset( $_POST['tenant_id'] ) ? sanitize_text_field( wp_unslash( $_POST['tenant_id'] ) ) : '';
         }
 
-        // Actualizar SOLO los campos que vienen del formulario (valores nuevos en texto plano)
-        // Los campos que no vienen (placeholder vacío) se MANTIENEN sin cambios
+        $existing = cloudsync_get_service_credentials( $service );
 
-        // Client ID
-        if ( '' !== $client_id ) {
-            $settings[ $client_id_key ] = $client_id;
-        } elseif ( ! isset( $settings[ $client_id_key ] ) || '' === $settings[ $client_id_key ] ) {
+        if ( empty( $existing['client_id'] ) && '' === $updates['client_id'] ) {
             throw new Exception( 'Client ID es obligatorio.' );
         }
 
-        // Client Secret
-        if ( '' !== $client_secret ) {
-            $settings[ $client_secret_key ] = $client_secret;
-        } elseif ( ! isset( $settings[ $client_secret_key ] ) || '' === $settings[ $client_secret_key ] ) {
+        if ( empty( $existing['client_secret'] ) && '' === $updates['client_secret'] ) {
             throw new Exception( 'Client Secret es obligatorio.' );
         }
 
-        // Refresh Token (opcional)
-        if ( '' !== $refresh_token ) {
-            $settings[ $token_key ] = $refresh_token;
-        }
+        cloudsync_store_service_credentials( $service, $updates );
 
-        // SharePoint Tenant ID
-        if ( 'sharepoint' === $service && '' !== $tenant_id ) {
-            $settings['sharepoint_tenant_id'] = $tenant_id;
-        }
-
-        // Guardar settings (cloudsync_save_settings encriptará los campos sensibles)
-        cloudsync_save_settings( $settings );
-
-        // También guardar en opciones individuales para compatibilidad
-        cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_id', $settings[ $client_id_key ] );
-
-        if ( '' !== $client_secret ) {
-            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_client_secret', cloudsync_encrypt( $client_secret ) );
-        }
-
-        if ( '' !== $refresh_token ) {
-            cloudsync_opt_set( $service_map[ $service ]['prefix'] . '_refresh_token', cloudsync_encrypt( $refresh_token ) );
-        }
-
-        if ( 'sharepoint' === $service && '' !== $tenant_id ) {
-            cloudsync_opt_set( 'cloudsync_sharepoint_tenant_id', $tenant_id );
-        }
-
-        error_log( sprintf( '[CloudSync] Credentials stored for %s (client_id:%s, secret:%s, token:%s)', $service, '' !== $client_id ? 'updated' : 'kept', '' !== $client_secret ? 'updated' : 'kept', '' !== $refresh_token ? 'updated' : 'kept' ) );
+        error_log( sprintf( '[CloudSync] Credentials stored for %s (client:%s, secret:%s, token:%s)', $service, '' === $updates['client_id'] ? 'kept' : 'updated', '' === $updates['client_secret'] ? 'kept' : 'updated', '' === $updates['refresh_token'] ? ( empty( $existing['refresh_token'] ) ? 'empty' : 'kept' ) : 'updated' ) );
 
         cloudsync_notice_success( '✅ Credenciales guardadas correctamente.' );
         error_log( sprintf( '[CloudSync] Credentials saved for %s.', $service ) );
@@ -214,32 +149,81 @@ function cloudsync_handle_oauth_connect(): void {
 
         $service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
 
-        if ( 'drive' !== $service ) {
-            throw new Exception( 'Solo Google Drive está habilitado para esta acción.' );
+        $allowed_services = array( 'google', 'dropbox', 'sharepoint' );
+
+        if ( ! in_array( $service, $allowed_services, true ) ) {
+            throw new Exception( 'Servicio inválido.' );
         }
 
-        $client_id = cloudsync_opt_get( 'cloudsync_drive_client_id', '' );
+        $credentials = cloudsync_get_service_credentials( $service );
+        $state       = wp_create_nonce( 'cloudsync_oauth_state_' . $service );
+        $redirect    = cloudsync_get_oauth_redirect_uri( $service );
+        $auth_url    = '';
 
-        if ( '' === $client_id ) {
-            $settings  = cloudsync_get_settings();
-            $client_id = isset( $settings['google_client_id'] ) ? $settings['google_client_id'] : '';
+        switch ( $service ) {
+            case 'google':
+                if ( empty( $credentials['client_id'] ) ) {
+                    throw new Exception( 'Falta Client ID de Google Drive.' );
+                }
+
+                $auth_url = add_query_arg(
+                    array(
+                        'response_type'         => 'code',
+                        'client_id'             => $credentials['client_id'],
+                        'redirect_uri'          => $redirect,
+                        'scope'                 => 'https://www.googleapis.com/auth/drive',
+                        'access_type'           => 'offline',
+                        'prompt'                => 'consent',
+                        'include_granted_scopes'=> 'true',
+                        'state'                 => $state,
+                    ),
+                    'https://accounts.google.com/o/oauth2/v2/auth'
+                );
+                break;
+
+            case 'dropbox':
+                if ( empty( $credentials['client_id'] ) ) {
+                    throw new Exception( 'Falta App Key de Dropbox.' );
+                }
+
+                $auth_url = add_query_arg(
+                    array(
+                        'response_type'    => 'code',
+                        'client_id'        => $credentials['client_id'],
+                        'redirect_uri'     => $redirect,
+                        'scope'            => 'files.metadata.read files.metadata.write',
+                        'token_access_type'=> 'offline',
+                        'state'            => $state,
+                    ),
+                    'https://www.dropbox.com/oauth2/authorize'
+                );
+                break;
+
+            case 'sharepoint':
+                if ( empty( $credentials['client_id'] ) ) {
+                    throw new Exception( 'Falta Client ID de SharePoint.' );
+                }
+
+                $tenant  = ! empty( $credentials['tenant_id'] ) ? $credentials['tenant_id'] : 'common';
+                $auth_url = add_query_arg(
+                    array(
+                        'client_id'     => $credentials['client_id'],
+                        'response_type' => 'code',
+                        'redirect_uri'  => $redirect,
+                        'response_mode' => 'query',
+                        'scope'         => 'offline_access https://graph.microsoft.com/.default',
+                        'state'         => $state,
+                    ),
+                    sprintf( 'https://login.microsoftonline.com/%s/oauth2/v2.0/authorize', rawurlencode( $tenant ) )
+                );
+                break;
         }
 
-        if ( '' === $client_id ) {
-            throw new Exception( 'Falta Client ID de Google Drive.' );
+        if ( empty( $auth_url ) ) {
+            throw new Exception( 'No se pudo construir la URL de autorización.' );
         }
 
-        $redirect_uri = admin_url( 'admin-post.php?action=cloudsync_oauth_callback&service=drive' );
-        $scope        = rawurlencode( 'https://www.googleapis.com/auth/drive.file' );
-        $auth_url     = 'https://accounts.google.com/o/oauth2/v2/auth'
-            . '?response_type=code'
-            . '&access_type=offline&prompt=consent'
-            . '&client_id=' . rawurlencode( $client_id )
-            . '&redirect_uri=' . rawurlencode( $redirect_uri )
-            . '&scope=' . $scope
-            . '&cloudsync_popup=1';
-
-        error_log( '[CloudSync] Redirecting to Google OAuth consent.' );
+        error_log( sprintf( '[CloudSync] Redirecting to OAuth consent for %s.', $service ) );
         wp_safe_redirect( $auth_url );
         exit;
     } catch ( Throwable $e ) {
@@ -259,9 +243,21 @@ function cloudsync_handle_oauth_connect(): void {
 function cloudsync_handle_oauth_callback(): void {
     try {
         $service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
+        $state   = isset( $_GET['state'] ) ? sanitize_text_field( wp_unslash( $_GET['state'] ) ) : '';
 
-        if ( 'drive' !== $service ) {
+        $allowed_services = array( 'google', 'dropbox', 'sharepoint' );
+
+        if ( ! in_array( $service, $allowed_services, true ) ) {
             throw new Exception( 'Servicio no soportado en callback.' );
+        }
+
+        if ( empty( $state ) || ! wp_verify_nonce( $state, 'cloudsync_oauth_state_' . $service ) ) {
+            throw new Exception( 'Estado OAuth inválido. Intenta nuevamente.' );
+        }
+
+        if ( isset( $_GET['error'] ) ) {
+            $error_description = isset( $_GET['error_description'] ) ? sanitize_text_field( wp_unslash( $_GET['error_description'] ) ) : sanitize_text_field( wp_unslash( $_GET['error'] ) );
+            throw new Exception( $error_description );
         }
 
         $code = isset( $_GET['code'] ) ? sanitize_text_field( wp_unslash( $_GET['code'] ) ) : '';
@@ -270,51 +266,45 @@ function cloudsync_handle_oauth_callback(): void {
             throw new Exception( 'Falta "code" en el callback.' );
         }
 
-        $settings      = cloudsync_get_settings();
-        $client_id     = isset( $settings['google_client_id'] ) ? $settings['google_client_id'] : '';
-        $client_secret = isset( $settings['google_client_secret'] ) ? $settings['google_client_secret'] : '';
-        $redirect_uri  = admin_url( 'admin-post.php?action=cloudsync_oauth_callback&service=drive' );
+        $connector = null;
 
-        $response = wp_remote_post(
-            'https://oauth2.googleapis.com/token',
-            array(
-                'timeout' => 20,
-                'headers' => array(
-                    'Content-Type' => 'application/x-www-form-urlencoded',
-                ),
-                'body'    => array(
-                    'code'          => $code,
-                    'client_id'     => $client_id,
-                    'client_secret' => $client_secret,
-                    'redirect_uri'  => $redirect_uri,
-                    'grant_type'    => 'authorization_code',
-                    'access_type'   => 'offline',
-                ),
-            )
+        switch ( $service ) {
+            case 'google':
+                $connector = new Connector_GoogleDrive();
+                break;
+            case 'dropbox':
+                $connector = new Connector_Dropbox();
+                break;
+            case 'sharepoint':
+                $connector = new Connector_SharePoint();
+                break;
+        }
+
+        if ( ! $connector || ! method_exists( $connector, 'exchange_code_for_tokens' ) ) {
+            throw new Exception( 'Conector OAuth inválido.' );
+        }
+
+        $tokens = $connector->exchange_code_for_tokens( $code );
+
+        if ( is_wp_error( $tokens ) ) {
+            throw new Exception( $tokens->get_error_message() );
+        }
+
+        if ( method_exists( $connector, 'oauth_callback' ) ) {
+            $connector->oauth_callback( $tokens );
+        }
+
+        $messages = array(
+            'google'     => __( '✅ Google Drive conectado correctamente.', 'secure-pdf-viewer' ),
+            'dropbox'    => __( '✅ Dropbox conectado correctamente.', 'secure-pdf-viewer' ),
+            'sharepoint' => __( '✅ SharePoint conectado correctamente.', 'secure-pdf-viewer' ),
         );
 
-        if ( is_wp_error( $response ) ) {
-            throw new Exception( $response->get_error_message() );
+        if ( isset( $messages[ $service ] ) ) {
+            cloudsync_notice_success( $messages[ $service ] );
         }
 
-        $body = json_decode( wp_remote_retrieve_body( $response ), true );
-
-        if ( ! is_array( $body ) ) {
-            throw new Exception( 'Respuesta inválida de Google.' );
-        }
-
-        if ( ! empty( $body['refresh_token'] ) ) {
-            $settings['google_refresh_token'] = $body['refresh_token'];
-            cloudsync_save_settings( $settings );
-            cloudsync_opt_set( 'cloudsync_drive_refresh_token', cloudsync_encrypt( $body['refresh_token'] ) );
-            cloudsync_notice_success( '✅ Google Drive conectado correctamente.' );
-            error_log( '[CloudSync] OAuth callback stored refresh token.' );
-        } elseif ( ! empty( $body['access_token'] ) ) {
-            cloudsync_notice_success( 'Conectado (sin refresh_token nuevo).' );
-            error_log( '[CloudSync] OAuth callback without new refresh token.' );
-        } else {
-            throw new Exception( 'No se recibió token.' );
-        }
+        cloudsync_add_log( __( 'OAuth tokens almacenados correctamente.', 'secure-pdf-viewer' ), array( 'service' => $service ) );
 
         echo '<script>if (window.opener) { window.opener.location.reload(); } window.close();</script>';
         exit;
@@ -333,7 +323,7 @@ function cloudsync_handle_oauth_callback(): void {
  *
  * @return void
  */
-function cloudsync_handle_revoke_access(): void {
+function cloudsync_handle_revoke_credentials(): void {
     try {
         if ( ! current_user_can( 'manage_options' ) ) {
             throw new Exception( 'Permisos insuficientes.' );
@@ -343,26 +333,61 @@ function cloudsync_handle_revoke_access(): void {
 
         $service = isset( $_GET['service'] ) ? sanitize_key( wp_unslash( $_GET['service'] ) ) : '';
 
-        $service_tokens = array(
-            'drive'      => array( 'option' => 'cloudsync_drive_refresh_token', 'settings_key' => 'google_refresh_token' ),
-            'dropbox'    => array( 'option' => 'cloudsync_dropbox_refresh_token', 'settings_key' => 'dropbox_refresh_token' ),
-            'sharepoint' => array( 'option' => 'cloudsync_sharepoint_refresh_token', 'settings_key' => 'sharepoint_refresh_token' ),
-        );
+        $allowed_services = array( 'google', 'dropbox', 'sharepoint' );
 
-        if ( ! isset( $service_tokens[ $service ] ) ) {
+        if ( ! in_array( $service, $allowed_services, true ) ) {
             throw new Exception( 'Servicio inválido.' );
         }
 
-        $settings = cloudsync_get_settings();
-        $settings[ $service_tokens[ $service ]['settings_key'] ] = '';
-        cloudsync_save_settings( $settings );
+        $credentials = cloudsync_get_service_credentials( $service );
 
-        delete_option( $service_tokens[ $service ]['option'] );
+        switch ( $service ) {
+            case 'google':
+                if ( ! empty( $credentials['refresh_token'] ) ) {
+                    wp_remote_post(
+                        'https://oauth2.googleapis.com/revoke',
+                        array(
+                            'body' => array( 'token' => $credentials['refresh_token'] ),
+                        )
+                    );
+                }
+                break;
+            case 'dropbox':
+                $token_to_revoke = ! empty( $credentials['access_token'] ) ? $credentials['access_token'] : $credentials['refresh_token'];
+
+                if ( $token_to_revoke && ! empty( $credentials['client_id'] ) && ! empty( $credentials['client_secret'] ) ) {
+                    wp_remote_post(
+                        'https://api.dropboxapi.com/2/oauth2/token/revoke',
+                        array(
+                            'headers' => array(
+                                'Authorization' => 'Basic ' . base64_encode( $credentials['client_id'] . ':' . $credentials['client_secret'] ),
+                                'Content-Type'  => 'application/x-www-form-urlencoded',
+                            ),
+                            'body'    => array( 'token' => $token_to_revoke ),
+                        )
+                    );
+                }
+                break;
+            case 'sharepoint':
+            default:
+                // Microsoft Graph tokens expire naturally; no revoke endpoint is required.
+                break;
+        }
+
+        cloudsync_store_service_credentials(
+            $service,
+            array(
+                'refresh_token' => '',
+                'access_token'  => '',
+                'token_expires' => 0,
+            ),
+            false
+        );
 
         cloudsync_notice_success( '🔒 Acceso revocado.' );
-        error_log( sprintf( '[CloudSync] Refresh token revoked for %s.', $service ) );
+        error_log( sprintf( '[CloudSync] Credentials revoked for %s.', $service ) );
     } catch ( Throwable $e ) {
-        error_log( '[CloudSync] revoke_access error: ' . $e->getMessage() );
+        error_log( '[CloudSync] revoke_credentials error: ' . $e->getMessage() );
         cloudsync_notice_error( '❌ Error al revocar: ' . $e->getMessage() );
     }
 
@@ -596,7 +621,7 @@ function cloudsync_handle_reinitialize_folders(): void {
 add_action( 'admin_post_cloudsync_save_credentials', 'cloudsync_handle_save_credentials' );
 add_action( 'admin_post_cloudsync_oauth_connect', 'cloudsync_handle_oauth_connect' );
 add_action( 'admin_post_cloudsync_oauth_callback', 'cloudsync_handle_oauth_callback' );
-add_action( 'admin_post_cloudsync_revoke_access', 'cloudsync_handle_revoke_access' );
+add_action( 'admin_post_cloudsync_revoke_credentials', 'cloudsync_handle_revoke_credentials' );
 add_action( 'admin_post_cloudsync_save_config', 'cloudsync_handle_save_config' );
 add_action( 'admin_post_cloudsync_save_advanced', 'cloudsync_handle_save_advanced' );
 add_action( 'admin_post_cloudsync_manual_sync', 'cloudsync_handle_manual_sync' );

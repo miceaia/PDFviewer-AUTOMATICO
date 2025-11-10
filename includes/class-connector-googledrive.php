@@ -9,6 +9,10 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+if ( ! class_exists( 'CloudSync_GoogleDrive', false ) ) {
+    class_alias( 'Connector_GoogleDrive', 'CloudSync_GoogleDrive' );
+}
+
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/interface-cloudsync-connector.php';
 
@@ -268,39 +272,162 @@ class Connector_GoogleDrive implements CloudSync_Connector_Interface {
     }
 
     /**
-     * Exchanges the refresh token for an access token.
+     * Retrieves a valid Google Drive access token, refreshing when required.
      *
-     * @since 4.0.0
+     * @since 4.3.0
      *
-     * @return string Access token or empty string when unavailable.
+     * @return string OAuth access token.
      */
-    protected function get_access_token() {
-        $settings = cloudsync_get_settings();
+    public function get_access_token() {
+        $credentials = cloudsync_get_service_credentials( 'google' );
 
-        if ( empty( $settings['google_refresh_token'] ) || empty( $settings['google_client_id'] ) || empty( $settings['google_client_secret'] ) ) {
+        if ( empty( $credentials['client_id'] ) || empty( $credentials['client_secret'] ) ) {
             return '';
         }
 
+        $access_token  = isset( $credentials['access_token'] ) ? $credentials['access_token'] : '';
+        $token_expires = isset( $credentials['token_expires'] ) ? (int) $credentials['token_expires'] : 0;
+
+        if ( $access_token && $token_expires > ( time() + 60 ) ) {
+            return $access_token;
+        }
+
+        if ( empty( $credentials['refresh_token'] ) ) {
+            return '';
+        }
+
+        return $this->refresh_access_token( $credentials );
+    }
+
+    /**
+     * Executes the refresh token flow.
+     *
+     * @since 4.3.0
+     *
+     * @param array<string, mixed> $credentials Stored credential set.
+     *
+     * @return string Access token or empty string when the refresh fails.
+     */
+    protected function refresh_access_token( array $credentials ) {
         $response = wp_remote_post(
             'https://oauth2.googleapis.com/token',
             array(
-                'body' => array(
-                    'client_id'     => $settings['google_client_id'],
-                    'client_secret' => $settings['google_client_secret'],
-                    'refresh_token' => $settings['google_refresh_token'],
+                'timeout' => 20,
+                'body'    => array(
+                    'client_id'     => $credentials['client_id'],
+                    'client_secret' => $credentials['client_secret'],
+                    'refresh_token' => $credentials['refresh_token'],
                     'grant_type'    => 'refresh_token',
                 ),
             )
         );
 
         if ( is_wp_error( $response ) ) {
-            cloudsync_add_log( __( 'Google Drive token refresh failed', 'secure-pdf-viewer' ), array( 'error' => $response->get_error_message() ) );
+            cloudsync_add_log(
+                __( 'Google Drive token refresh failed', 'secure-pdf-viewer' ),
+                array( 'error' => $response->get_error_message() )
+            );
+
             return '';
         }
 
         $data = json_decode( wp_remote_retrieve_body( $response ), true );
 
-        return isset( $data['access_token'] ) ? $data['access_token'] : '';
+        if ( empty( $data['access_token'] ) ) {
+            cloudsync_add_log( __( 'Google Drive returned an empty access token.', 'secure-pdf-viewer' ), array( 'response' => $data ) );
+            return '';
+        }
+
+        $expires = isset( $data['expires_in'] ) ? (int) $data['expires_in'] : 3600;
+
+        $updates = array(
+            'access_token'  => $data['access_token'],
+            'token_expires' => time() + $expires,
+        );
+
+        if ( ! empty( $data['refresh_token'] ) ) {
+            $updates['refresh_token'] = $data['refresh_token'];
+        }
+
+        cloudsync_store_service_credentials( 'google', $updates );
+
+        return $data['access_token'];
+    }
+
+    /**
+     * Exchanges an authorization code for tokens during OAuth callback.
+     *
+     * @since 4.3.0
+     *
+     * @param string $code Authorization code provided by Google.
+     *
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function exchange_code_for_tokens( $code ) {
+        $credentials = cloudsync_get_service_credentials( 'google' );
+
+        if ( empty( $credentials['client_id'] ) || empty( $credentials['client_secret'] ) ) {
+            return new WP_Error( 'cloudsync_google_missing_keys', __( 'Configura el Client ID y Secret antes de autorizar Google Drive.', 'secure-pdf-viewer' ) );
+        }
+
+        $response = wp_remote_post(
+            'https://oauth2.googleapis.com/token',
+            array(
+                'timeout' => 20,
+                'headers' => array(
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                ),
+                'body'    => array(
+                    'code'          => $code,
+                    'client_id'     => $credentials['client_id'],
+                    'client_secret' => $credentials['client_secret'],
+                    'redirect_uri'  => cloudsync_get_oauth_redirect_uri( 'google' ),
+                    'grant_type'    => 'authorization_code',
+                    'access_type'   => 'offline',
+                ),
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            return $response;
+        }
+
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+        if ( empty( $body ) || ! is_array( $body ) ) {
+            return new WP_Error( 'cloudsync_google_empty_response', __( 'Google Drive devolvió una respuesta vacía durante el intercambio de tokens.', 'secure-pdf-viewer' ) );
+        }
+
+        return $body;
+    }
+
+    /**
+     * Persists tokens received from the OAuth callback.
+     *
+     * @since 4.3.0
+     *
+     * @param array<string, mixed> $tokens Token payload returned by Google.
+     *
+     * @return void
+     */
+    public function oauth_callback( array $tokens ) {
+        $updates = array();
+
+        if ( ! empty( $tokens['access_token'] ) ) {
+            $updates['access_token'] = $tokens['access_token'];
+        }
+
+        if ( ! empty( $tokens['refresh_token'] ) ) {
+            $updates['refresh_token'] = $tokens['refresh_token'];
+        }
+
+        if ( ! empty( $tokens['expires_in'] ) ) {
+            $updates['token_expires'] = time() + (int) $tokens['expires_in'];
+        }
+
+        cloudsync_store_service_credentials( 'google', $updates );
+
+        cloudsync_add_log( __( 'Google Drive tokens stored from OAuth callback.', 'secure-pdf-viewer' ), array( 'service' => 'google' ) );
     }
 
     /**

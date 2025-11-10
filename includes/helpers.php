@@ -14,12 +14,13 @@ if ( ! function_exists( 'cloudsync_encrypt' ) ) {
      * Encrypts plain text using AES-256-CBC with WordPress salts.
      *
      * Falls back to returning the original value when OpenSSL is missing.
+     * FIX: Added error handling to prevent fatal errors during encryption.
      *
      * @since 4.1.5
      *
      * @param string $plain Plain text string to encrypt.
      *
-     * @return string Encrypted string or the original plain text when encryption is not available.
+     * @return string Encrypted string or the original plain text when encryption fails.
      */
     function cloudsync_encrypt( string $plain ): string {
         if ( '' === $plain ) {
@@ -37,12 +38,25 @@ if ( ! function_exists( 'cloudsync_encrypt' ) ) {
             return $plain;
         }
 
-        $key = hash( 'sha256', wp_salt( 'auth' ), true );
-        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+        try {
+            $key = hash( 'sha256', wp_salt( 'auth' ), true );
+            $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
 
-        $encrypted = openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
+            $encrypted = @openssl_encrypt( $plain, 'AES-256-CBC', $key, 0, $iv );
 
-        return $encrypted ? $encrypted : $plain;
+            if ( false === $encrypted || '' === $encrypted ) {
+                error_log( '[CloudSync] Encryption failed, storing plain text as fallback.' );
+                return $plain;
+            }
+
+            return $encrypted;
+        } catch ( Exception $e ) {
+            error_log( '[CloudSync] Encryption exception: ' . $e->getMessage() );
+            return $plain;
+        } catch ( Throwable $e ) {
+            error_log( '[CloudSync] Encryption error: ' . $e->getMessage() );
+            return $plain;
+        }
     }
 }
 
@@ -50,11 +64,13 @@ if ( ! function_exists( 'cloudsync_decrypt' ) ) {
     /**
      * Decrypts a string previously encrypted with {@see cloudsync_encrypt()}.
      *
+     * FIX: Added comprehensive error handling for corrupted/double-encrypted data.
+     *
      * @since 4.1.5
      *
      * @param string $cipher Encrypted cipher text.
      *
-     * @return string Decrypted string or the original cipher when OpenSSL is missing.
+     * @return string Decrypted string, or empty string if decryption fails completely.
      */
     function cloudsync_decrypt( string $cipher ): string {
         if ( '' === $cipher ) {
@@ -72,26 +88,49 @@ if ( ! function_exists( 'cloudsync_decrypt' ) ) {
             return $cipher;
         }
 
-        $key = hash( 'sha256', wp_salt( 'auth' ), true );
-        $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
+        try {
+            $key = hash( 'sha256', wp_salt( 'auth' ), true );
+            $iv  = substr( hash( 'sha256', wp_salt( 'secure-auth' ) ), 0, 16 );
 
-        $decrypted = openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
+            // Suppress OpenSSL warnings for corrupted data
+            $decrypted = @openssl_decrypt( $cipher, 'AES-256-CBC', $key, 0, $iv );
 
-        if ( false !== $decrypted ) {
-            return $decrypted;
-        }
-
-        $decoded = base64_decode( $cipher, true );
-
-        if ( false !== $decoded ) {
-            $fallback = openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
-
-            if ( false !== $fallback ) {
-                return $fallback;
+            if ( false !== $decrypted && '' !== $decrypted ) {
+                return $decrypted;
             }
-        }
 
-        return $cipher;
+            // Try base64 decoding first (legacy format)
+            $decoded = @base64_decode( $cipher, true );
+
+            if ( false !== $decoded && '' !== $decoded ) {
+                $fallback = @openssl_decrypt( $decoded, 'AES-256-CBC', $key, 0, $iv );
+
+                if ( false !== $fallback && '' !== $fallback ) {
+                    return $fallback;
+                }
+            }
+
+            // If all decryption attempts fail, log the issue and return empty
+            // This prevents fatal errors from corrupted/double-encrypted data
+            static $error_logged = array();
+            $hash = substr( md5( $cipher ), 0, 8 );
+
+            if ( ! isset( $error_logged[ $hash ] ) ) {
+                error_log( sprintf(
+                    '[CloudSync] WARNING: Failed to decrypt credential (hash: %s). Data may be corrupted. Use clear-credentials.php to reset.',
+                    $hash
+                ) );
+                $error_logged[ $hash ] = true;
+            }
+
+            return ''; // Return empty string instead of corrupted data
+        } catch ( Exception $e ) {
+            error_log( '[CloudSync] Decryption exception: ' . $e->getMessage() );
+            return '';
+        } catch ( Throwable $e ) {
+            error_log( '[CloudSync] Decryption error: ' . $e->getMessage() );
+            return '';
+        }
     }
 }
 

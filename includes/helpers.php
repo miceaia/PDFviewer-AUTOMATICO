@@ -334,26 +334,29 @@ function cloudsync_store_service_credentials( $service, array $values, $preserve
     $fields            = $map[ $service ]['fields'];
     $sensitive_fields  = $map[ $service ]['sensitive_fields'];
     $preserve_on_empty = isset( $map[ $service ]['preserve_on_empty'] ) ? $map[ $service ]['preserve_on_empty'] : array();
-    $current           = cloudsync_get_service_credentials( $service, false );
 
     foreach ( $fields as $field => $suffix ) {
         $option_name = $map[ $service ]['prefix'] . '_' . $suffix;
-        $value       = $current[ $field ] ?? '';
 
-        if ( array_key_exists( $field, $values ) ) {
-            $candidate = $values[ $field ];
-
-            if ( is_string( $candidate ) ) {
-                $candidate = trim( $candidate );
-            }
-
-            if ( '' === $candidate && $preserve_empty && in_array( $field, $preserve_on_empty, true ) ) {
-                // Keep the previous value when empty strings are submitted.
-                $value = $current[ $field ] ?? '';
-            } else {
-                $value = $candidate;
-            }
+        // FIX DOBLE ENCRIPTACIÓN: Solo procesar si el campo viene en $values
+        if ( ! array_key_exists( $field, $values ) ) {
+            // Si el campo no viene en $values, no hacer nada (mantener valor existente)
+            continue;
         }
+
+        $candidate = $values[ $field ];
+
+        if ( is_string( $candidate ) ) {
+            $candidate = trim( $candidate );
+        }
+
+        // Si viene vacío y preserve_empty está activo, no actualizar (mantener valor existente)
+        if ( '' === $candidate && $preserve_empty && in_array( $field, $preserve_on_empty, true ) ) {
+            continue; // No actualizar, mantener valor existente en DB
+        }
+
+        // Aquí $candidate es un valor NUEVO en texto plano que necesita encriptarse
+        $value = $candidate;
 
         if ( in_array( $field, $sensitive_fields, true ) ) {
             $stored = '' === $value ? '' : cloudsync_encrypt( (string) $value );
@@ -809,4 +812,57 @@ function cloudsync_prepare_name( $name, $post_id ) {
     $name = apply_filters( 'cloudsync_course_folder_name', $name, $post_id );
 
     return wp_strip_all_tags( $name );
+}
+
+/**
+ * Clears all stored credentials for a specific service.
+ *
+ * Use this to remove corrupted credentials that may have been double-encrypted.
+ *
+ * @since 4.3.1
+ *
+ * @param string $service Service slug (google, dropbox, sharepoint).
+ *
+ * @return bool True if credentials were cleared, false if service is invalid.
+ */
+function cloudsync_clear_service_credentials( $service ) {
+    $map = cloudsync_get_service_option_map();
+
+    if ( ! isset( $map[ $service ] ) ) {
+        return false;
+    }
+
+    $fields = $map[ $service ]['fields'];
+
+    foreach ( $fields as $field => $suffix ) {
+        $option_name = $map[ $service ]['prefix'] . '_' . $suffix;
+        delete_option( $option_name );
+    }
+
+    cloudsync_refresh_legacy_settings_cache();
+
+    error_log( sprintf( '[CloudSync] Cleared all credentials for service: %s', $service ) );
+
+    return true;
+}
+
+/**
+ * Clears all CloudSync credentials from the database.
+ *
+ * Use this to remove all corrupted credentials and start fresh.
+ *
+ * @since 4.3.1
+ *
+ * @return void
+ */
+function cloudsync_clear_all_credentials() {
+    $services = array( 'google', 'dropbox', 'sharepoint' );
+
+    foreach ( $services as $service ) {
+        cloudsync_clear_service_credentials( $service );
+    }
+
+    delete_option( 'cloudsync_settings' );
+
+    error_log( '[CloudSync] Cleared all credentials for all services.' );
 }

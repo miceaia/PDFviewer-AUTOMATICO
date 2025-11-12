@@ -6,18 +6,16 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
     }
 
-    class SecurePDFViewer {
+    class MiceaPDFViewer {
         constructor(container) {
             this.container = $(container);
             this.pdfUrl = this.container.data('pdf-url');
+            this.pdfId = this.container.data('pdf-id') || 'default';
             this.canvas = this.container.find('.spv-pdf-canvas')[0];
             this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
 
-            // Canvas para anotaciones
-            this.annotationCanvas = null;
-            this.annotationCtx = null;
-
+            // PDF.js
             this.pdfDoc = null;
             this.currentPage = 1;
             this.totalPages = 0;
@@ -26,17 +24,30 @@
             this.maxScale = 3.0;
             this.minScale = 0.5;
 
-            // Anotaciones
-            this.annotations = {}; // Por página
-            this.currentTool = 'none'; // none, highlight, eraser
-            this.currentColor = '#ffff00'; // amarillo por defecto
-            this.isDrawing = false;
-            this.lastX = 0;
-            this.lastY = 0;
+            // Usuario
+            const userData = this.container.data('user-info') || {};
+            this.userId = userData.id || 'anonymous';
+            this.userName = userData.name || 'Usuario';
+            this.userEmail = userData.email || '';
 
-            // Historial para deshacer/rehacer
-            this.history = [];
-            this.historyStep = -1;
+            // Highlights system
+            this.highlights = {}; // { highlightId: Highlight }
+            this.highlightsByPage = {}; // { page: [highlightIds] }
+            this.currentColor = null;
+            this.eraserMode = false;
+
+            // Undo/Redo stacks
+            this.undoStack = [];
+            this.redoStack = [];
+
+            // Persistencia
+            this.isDirty = false;
+            this.lastSavedAt = null;
+            this.autosaveTimer = null;
+
+            // Layers
+            this.textLayer = null;
+            this.highlightsLayer = null;
 
             // Fullscreen
             this.isFullscreen = false;
@@ -45,29 +56,37 @@
         }
 
         init() {
-            this.loadPDF();
-            this.createAnnotationCanvas();
+            this.createLayers();
             this.bindEvents();
-            this.preventCopyPaste();
-            this.addWatermark();
+            this.bindKeyboardShortcuts();
+            this.loadPDF();
             this.loadUserAnnotations();
+            this.preventCopyPaste();
         }
 
-        createAnnotationCanvas() {
-            // Crear canvas overlay para anotaciones
-            const canvasOverlay = document.createElement('canvas');
-            canvasOverlay.className = 'spv-annotation-canvas';
-            canvasOverlay.style.position = 'absolute';
-            canvasOverlay.style.top = '0';
-            canvasOverlay.style.left = '0';
-            canvasOverlay.style.pointerEvents = 'none';
-            canvasOverlay.style.zIndex = '2';
+        createLayers() {
+            const layersContainer = $('<div class="spv-layers-container"></div>').css({
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none'
+            });
 
-            this.annotationCanvas = canvasOverlay;
-            this.annotationCtx = canvasOverlay.getContext('2d');
+            // Text layer para selección
+            this.textLayer = $('<div class="spv-text-layer"></div>')[0];
 
-            // Agregar al container del canvas
-            $(this.canvas).parent().css('position', 'relative').append(canvasOverlay);
+            // SVG layer para highlights
+            this.highlightsLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            this.highlightsLayer.classList.add('spv-highlights-layer');
+            this.highlightsLayer.style.width = '100%';
+            this.highlightsLayer.style.height = '100%';
+
+            layersContainer.append(this.highlightsLayer);
+            layersContainer.append(this.textLayer);
+
+            $(this.canvas).parent().css('position', 'relative').append(layersContainer);
         }
 
         async loadPDF() {
@@ -88,7 +107,6 @@
                 this.hideLoading();
 
                 await this.renderPage(this.currentPage);
-
                 this.updateButtons();
 
             } catch (error) {
@@ -98,7 +116,11 @@
         }
 
         async renderPage(pageNum) {
-            if (this.rendering) {
+            if (this.rendering || !this.pdfDoc) {
+                return;
+            }
+
+            if (pageNum < 1 || pageNum > this.totalPages) {
                 return;
             }
 
@@ -111,27 +133,16 @@
                 const originalViewport = page.getViewport({ scale: 1.0 });
                 const containerWidth = this.canvasContainer.width() - 40;
                 const containerScale = containerWidth / originalViewport.width;
-                const effectiveScale = Math.min(this.scale, containerScale * 1.5);
+                const effectiveScale = this.scale;
 
                 const viewport = page.getViewport({ scale: effectiveScale });
 
+                // Ajustar canvas
                 this.canvas.width = viewport.width;
                 this.canvas.height = viewport.height;
-
-                // Actualizar canvas de anotaciones también
-                this.annotationCanvas.width = viewport.width;
-                this.annotationCanvas.height = viewport.height;
-
-                // Posicionar annotation canvas
-                const canvasRect = this.canvas.getBoundingClientRect();
-                const containerRect = this.canvas.parentElement.getBoundingClientRect();
-                $(this.annotationCanvas).css({
-                    left: (canvasRect.left - containerRect.left) + 'px',
-                    top: (canvasRect.top - containerRect.top) + 'px'
-                });
-
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
+                // Renderizar PDF
                 const renderContext = {
                     canvasContext: this.ctx,
                     viewport: viewport
@@ -139,12 +150,18 @@
 
                 await page.render(renderContext).promise;
 
+                // Renderizar text layer
+                await this.renderTextLayer(page, viewport);
+
+                // Renderizar highlights de esta página
+                this.renderHighlights(pageNum);
+
+                // Agregar marca de agua
+                this.addWatermarkToPage();
+
                 this.currentPage = pageNum;
                 this.updatePageInfo();
                 this.updateButtons();
-
-                // Redibujar anotaciones de esta página
-                this.redrawAnnotations();
 
             } catch (error) {
                 console.error('Error renderizando página:', error);
@@ -155,239 +172,443 @@
             }
         }
 
+        async renderTextLayer(page, viewport) {
+            // Limpiar text layer anterior
+            $(this.textLayer).empty();
+
+            try {
+                const textContent = await page.getTextContent();
+
+                // Configurar dimensiones del text layer
+                $(this.textLayer).css({
+                    width: viewport.width + 'px',
+                    height: viewport.height + 'px'
+                });
+
+                // Renderizar texto
+                pdfjsLib.renderTextLayer({
+                    textContentSource: textContent,
+                    container: this.textLayer,
+                    viewport: viewport,
+                    textDivs: []
+                });
+
+            } catch (error) {
+                console.error('Error renderizando text layer:', error);
+            }
+        }
+
+        renderHighlights(pageNum) {
+            // Limpiar SVG
+            while (this.highlightsLayer.firstChild) {
+                this.highlightsLayer.removeChild(this.highlightsLayer.firstChild);
+            }
+
+            // Ajustar tamaño del SVG
+            this.highlightsLayer.setAttribute('width', this.canvas.width);
+            this.highlightsLayer.setAttribute('height', this.canvas.height);
+
+            // Renderizar highlights de esta página
+            const pageHighlights = this.highlightsByPage[pageNum] || [];
+
+            pageHighlights.forEach(highlightId => {
+                const highlight = this.highlights[highlightId];
+                if (highlight) {
+                    this.drawHighlight(highlight);
+                }
+            });
+        }
+
+        drawHighlight(highlight) {
+            highlight.quads.forEach(quad => {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', quad.x);
+                rect.setAttribute('y', quad.y);
+                rect.setAttribute('width', quad.w);
+                rect.setAttribute('height', quad.h);
+                rect.setAttribute('fill', highlight.color);
+                rect.setAttribute('opacity', '0.4');
+                rect.setAttribute('data-highlight-id', highlight.id);
+                rect.classList.add('spv-highlight-rect');
+
+                // Event para borrar
+                $(rect).on('click', (e) => {
+                    if (this.eraserMode) {
+                        e.stopPropagation();
+                        this.removeHighlight(highlight.id);
+                    }
+                });
+
+                this.highlightsLayer.appendChild(rect);
+            });
+        }
+
+        addWatermarkToPage() {
+            const watermarkText = `Usuario: ${this.userName} · Fecha: ${new Date().toLocaleDateString()}`;
+
+            // Dibujar marca de agua en el canvas
+            this.ctx.save();
+            this.ctx.globalAlpha = 0.15;
+            this.ctx.fillStyle = '#000000';
+            this.ctx.font = '14px Arial';
+
+            const centerX = this.canvas.width / 2;
+            const centerY = this.canvas.height / 2;
+
+            this.ctx.translate(centerX, centerY);
+            this.ctx.rotate(-30 * Math.PI / 180);
+
+            const textWidth = this.ctx.measureText(watermarkText).width;
+            this.ctx.fillText(watermarkText, -textWidth / 2, 0);
+
+            // Repetir en esquinas
+            this.ctx.fillText(watermarkText, -textWidth / 2, -this.canvas.height / 3);
+            this.ctx.fillText(watermarkText, -textWidth / 2, this.canvas.height / 3);
+
+            this.ctx.restore();
+        }
+
         bindEvents() {
             const self = this;
 
             // Navegación
-            this.container.find('.spv-prev').on('click', function() {
-                if (self.currentPage > 1 && !self.rendering) {
-                    self.renderPage(self.currentPage - 1);
-                }
-            });
-
-            this.container.find('.spv-next').on('click', function() {
-                if (self.currentPage < self.totalPages && !self.rendering) {
-                    self.renderPage(self.currentPage + 1);
-                }
-            });
+            $('#btn-prev', this.container).on('click', () => this.prevPage());
+            $('#btn-next', this.container).on('click', () => this.nextPage());
 
             // Zoom
-            this.container.find('.spv-zoom-in').on('click', function() {
-                self.scale += 0.25;
-                if (self.scale > self.maxScale) self.scale = self.maxScale;
-                self.updateZoomLevel();
-                self.renderPage(self.currentPage);
-            });
+            $('#btn-zoom-in', this.container).on('click', () => this.zoomIn());
+            $('#btn-zoom-out', this.container).on('click', () => this.zoomOut());
 
-            this.container.find('.spv-zoom-out').on('click', function() {
-                self.scale -= 0.25;
-                if (self.scale < self.minScale) self.scale = self.minScale;
-                self.updateZoomLevel();
-                self.renderPage(self.currentPage);
-            });
+            // Colores de highlight
+            $('#hl-yellow', this.container).on('click', () => this.selectHighlightColor('#ffff00', 'yellow'));
+            $('#hl-green', this.container).on('click', () => this.selectHighlightColor('#00ff00', 'green'));
+            $('#hl-blue', this.container).on('click', () => this.selectHighlightColor('#00bfff', 'blue'));
+            $('#hl-pink', this.container).on('click', () => this.selectHighlightColor('#ff69b4', 'pink'));
 
-            // Herramientas de anotación
-            this.container.find('.spv-highlight-tool').on('click', function() {
-                self.currentTool = 'highlight';
-                self.updateToolButtons();
-                $(self.annotationCanvas).css('pointerEvents', 'auto');
-            });
+            // Borrador
+            $('#hl-erase', this.container).on('click', () => this.toggleEraserMode());
 
-            this.container.find('.spv-eraser-tool').on('click', function() {
-                self.currentTool = 'eraser';
-                self.updateToolButtons();
-                $(self.annotationCanvas).css('pointerEvents', 'auto');
-            });
-
-            this.container.find('.spv-select-tool').on('click', function() {
-                self.currentTool = 'none';
-                self.updateToolButtons();
-                $(self.annotationCanvas).css('pointerEvents', 'none');
-            });
-
-            // Selector de color
-            this.container.find('.spv-color-picker').on('change', function() {
-                self.currentColor = $(this).val();
-            });
-
-            // Color presets
-            this.container.find('.spv-color-preset').on('click', function() {
-                const color = $(this).data('color');
-                self.currentColor = color;
-                self.container.find('.spv-color-picker').val(color);
-            });
-
-            // Deshacer/Rehacer
-            this.container.find('.spv-undo').on('click', function() {
-                self.undo();
-            });
-
-            this.container.find('.spv-redo').on('click', function() {
-                self.redo();
-            });
+            // Undo/Redo
+            $('#btn-undo', this.container).on('click', () => this.undo());
+            $('#btn-redo', this.container).on('click', () => this.redo());
 
             // Pantalla completa
-            this.container.find('.spv-fullscreen').on('click', function() {
-                self.toggleFullscreen();
-            });
+            $('#btn-fullscreen', this.container).on('click', () => this.toggleFullscreen());
 
-            // Guardar anotaciones
-            this.container.find('.spv-save-annotations').on('click', function() {
-                self.saveAnnotations();
-            });
+            // Guardar
+            $('#btn-save', this.container).on('click', () => this.saveAnnotations(true));
 
-            // Dibujo en canvas de anotaciones
-            $(this.annotationCanvas).on('mousedown', function(e) {
-                if (self.currentTool === 'none') return;
-                self.isDrawing = true;
-                const rect = self.annotationCanvas.getBoundingClientRect();
-                self.lastX = e.clientX - rect.left;
-                self.lastY = e.clientY - rect.top;
-            });
-
-            $(this.annotationCanvas).on('mousemove', function(e) {
-                if (!self.isDrawing || self.currentTool === 'none') return;
-
-                const rect = self.annotationCanvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-
-                self.draw(self.lastX, self.lastY, x, y);
-
-                self.lastX = x;
-                self.lastY = y;
-            });
-
-            $(this.annotationCanvas).on('mouseup', function() {
-                if (self.isDrawing) {
-                    self.isDrawing = false;
-                    self.saveAnnotationState();
-                }
-            });
-
-            $(this.annotationCanvas).on('mouseleave', function() {
-                self.isDrawing = false;
-            });
-
-            // Protección
-            $(this.canvas).on('contextmenu', function(e) {
-                e.preventDefault();
-                return false;
-            });
-
-            $(this.canvas).on('dragstart', function(e) {
-                e.preventDefault();
-                return false;
+            // Selección de texto
+            $(this.textLayer).on('mouseup', () => {
+                setTimeout(() => this.handleTextSelection(), 10);
             });
 
             // Responsive
             let resizeTimer;
-            $(window).on('resize', function() {
+            $(window).on('resize', () => {
                 clearTimeout(resizeTimer);
-                resizeTimer = setTimeout(function() {
-                    if (self.pdfDoc && !self.rendering) {
-                        self.renderPage(self.currentPage);
+                resizeTimer = setTimeout(() => {
+                    if (this.pdfDoc && !this.rendering) {
+                        this.renderPage(this.currentPage);
                     }
                 }, 250);
             });
 
             // Fullscreen change
-            $(document).on('fullscreenchange webkitfullscreenchange mozfullscreenchange msfullscreenchange', function() {
-                self.isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement ||
+            $(document).on('fullscreenchange webkitfullscreenchange mozfullscreenchange msfullscreenchange', () => {
+                this.isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement ||
                                       document.mozFullScreenElement || document.msFullscreenElement);
-                self.updateFullscreenButton();
+                this.updateFullscreenButton();
+            });
+
+            // Protección
+            $(this.canvas).on('contextmenu dragstart', (e) => {
+                e.preventDefault();
+                return false;
             });
         }
 
-        draw(x1, y1, x2, y2) {
-            this.annotationCtx.beginPath();
-            this.annotationCtx.moveTo(x1, y1);
-            this.annotationCtx.lineTo(x2, y2);
+        bindKeyboardShortcuts() {
+            $(document).on('keydown', (e) => {
+                // Solo si el visor está visible
+                if (!this.container.is(':visible')) return;
 
-            if (this.currentTool === 'highlight') {
-                this.annotationCtx.strokeStyle = this.currentColor;
-                this.annotationCtx.globalAlpha = 0.5;
-                this.annotationCtx.lineWidth = 20;
-                this.annotationCtx.lineCap = 'round';
-            } else if (this.currentTool === 'eraser') {
-                this.annotationCtx.globalCompositeOperation = 'destination-out';
-                this.annotationCtx.lineWidth = 30;
-                this.annotationCtx.lineCap = 'round';
-            }
+                // Undo: Ctrl+Z o Cmd+Z
+                if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.undo();
+                    return false;
+                }
 
-            this.annotationCtx.stroke();
+                // Redo: Ctrl+Y o Cmd+Shift+Z
+                if (((e.ctrlKey || e.metaKey) && e.key === 'y') ||
+                    ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z')) {
+                    e.preventDefault();
+                    this.redo();
+                    return false;
+                }
 
-            // Restaurar valores
-            this.annotationCtx.globalAlpha = 1.0;
-            this.annotationCtx.globalCompositeOperation = 'source-over';
+                // Navegación con flechas
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    this.prevPage();
+                    return false;
+                }
+
+                if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    this.nextPage();
+                    return false;
+                }
+
+                // Escape para salir de fullscreen
+                if (e.key === 'Escape' && this.isFullscreen) {
+                    // El navegador maneja esto automáticamente
+                }
+
+                // Prevenir Ctrl+S, Ctrl+P, Ctrl+C
+                if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'p' || e.key === 'c')) {
+                    e.preventDefault();
+                    return false;
+                }
+            });
         }
 
-        redrawAnnotations() {
-            // Limpiar canvas de anotaciones
-            this.annotationCtx.clearRect(0, 0, this.annotationCanvas.width, this.annotationCanvas.height);
+        handleTextSelection() {
+            const selection = window.getSelection();
 
-            // Redibujar anotaciones de la página actual
-            const pageAnnotations = this.annotations[this.currentPage];
-            if (pageAnnotations) {
-                const img = new Image();
-                img.onload = () => {
-                    this.annotationCtx.drawImage(img, 0, 0);
+            if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+                return;
+            }
+
+            // Verificar que la selección está dentro del textLayer
+            const range = selection.getRangeAt(0);
+            if (!$(range.commonAncestorContainer).closest(this.textLayer).length) {
+                return;
+            }
+
+            // Si hay un color seleccionado, crear highlight
+            if (this.currentColor && !this.eraserMode) {
+                this.createHighlightFromSelection(selection);
+                selection.removeAllRanges();
+            }
+        }
+
+        createHighlightFromSelection(selection) {
+            const range = selection.getRangeAt(0);
+            const rects = range.getClientRects();
+
+            if (rects.length === 0) return;
+
+            const canvasRect = this.canvas.getBoundingClientRect();
+            const quads = [];
+
+            // Convertir rects de DOM a coordenadas del canvas
+            for (let i = 0; i < rects.length; i++) {
+                const rect = rects[i];
+
+                const quad = {
+                    x: rect.left - canvasRect.left,
+                    y: rect.top - canvasRect.top,
+                    w: rect.width,
+                    h: rect.height,
+                    page: this.currentPage,
+                    scale: this.scale
                 };
-                img.src = pageAnnotations;
+
+                // Validar que está dentro del canvas
+                if (quad.x >= 0 && quad.y >= 0 &&
+                    quad.x + quad.w <= this.canvas.width &&
+                    quad.y + quad.h <= this.canvas.height) {
+                    quads.push(quad);
+                }
             }
+
+            if (quads.length === 0) return;
+
+            // Crear highlight
+            const highlight = {
+                id: 'hl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                page: this.currentPage,
+                color: this.currentColor,
+                quads: quads,
+                createdAt: Date.now(),
+                createdBy: this.userId
+            };
+
+            this.addHighlight(highlight);
         }
 
-        saveAnnotationState() {
-            // Guardar estado actual de anotaciones para esta página
-            this.annotations[this.currentPage] = this.annotationCanvas.toDataURL();
+        addHighlight(highlight) {
+            // Agregar a colección
+            this.highlights[highlight.id] = highlight;
 
-            // Agregar al historial
-            if (this.historyStep < this.history.length - 1) {
-                this.history = this.history.slice(0, this.historyStep + 1);
+            if (!this.highlightsByPage[highlight.page]) {
+                this.highlightsByPage[highlight.page] = [];
             }
+            this.highlightsByPage[highlight.page].push(highlight.id);
 
-            this.history.push({
-                page: this.currentPage,
-                state: JSON.parse(JSON.stringify(this.annotations))
+            // Agregar a undo stack
+            this.pushAction({
+                type: 'ADD_HIGHLIGHT',
+                payload: highlight
             });
 
-            this.historyStep++;
+            // Re-renderizar highlights
+            this.renderHighlights(this.currentPage);
+
+            // Marcar como dirty y autosave
+            this.markDirty();
+        }
+
+        removeHighlight(highlightId) {
+            const highlight = this.highlights[highlightId];
+            if (!highlight) return;
+
+            // Remover de colecciones
+            delete this.highlights[highlightId];
+
+            const pageHighlights = this.highlightsByPage[highlight.page];
+            if (pageHighlights) {
+                const index = pageHighlights.indexOf(highlightId);
+                if (index > -1) {
+                    pageHighlights.splice(index, 1);
+                }
+            }
+
+            // Agregar a undo stack
+            this.pushAction({
+                type: 'REMOVE_HIGHLIGHT',
+                payload: { id: highlightId, highlight: highlight }
+            });
+
+            // Re-renderizar
+            this.renderHighlights(this.currentPage);
+
+            // Marcar como dirty
+            this.markDirty();
+        }
+
+        pushAction(action) {
+            this.undoStack.push(action);
+            this.redoStack = []; // Limpiar redo stack
             this.updateUndoRedoButtons();
         }
 
         undo() {
-            if (this.historyStep > 0) {
-                this.historyStep--;
-                this.annotations = JSON.parse(JSON.stringify(this.history[this.historyStep].state));
-                this.redrawAnnotations();
-                this.updateUndoRedoButtons();
+            if (this.undoStack.length === 0) return;
+
+            const action = this.undoStack.pop();
+            this.redoStack.push(action);
+
+            // Revertir acción
+            if (action.type === 'ADD_HIGHLIGHT') {
+                // Remover el highlight sin agregar a undo
+                const hl = action.payload;
+                delete this.highlights[hl.id];
+                const pageHighlights = this.highlightsByPage[hl.page];
+                if (pageHighlights) {
+                    const index = pageHighlights.indexOf(hl.id);
+                    if (index > -1) pageHighlights.splice(index, 1);
+                }
+            } else if (action.type === 'REMOVE_HIGHLIGHT') {
+                // Re-agregar el highlight sin agregar a undo
+                const hl = action.payload.highlight;
+                this.highlights[hl.id] = hl;
+                if (!this.highlightsByPage[hl.page]) {
+                    this.highlightsByPage[hl.page] = [];
+                }
+                this.highlightsByPage[hl.page].push(hl.id);
             }
+
+            this.renderHighlights(this.currentPage);
+            this.updateUndoRedoButtons();
+            this.markDirty();
         }
 
         redo() {
-            if (this.historyStep < this.history.length - 1) {
-                this.historyStep++;
-                this.annotations = JSON.parse(JSON.stringify(this.history[this.historyStep].state));
-                this.redrawAnnotations();
-                this.updateUndoRedoButtons();
+            if (this.redoStack.length === 0) return;
+
+            const action = this.redoStack.pop();
+            this.undoStack.push(action);
+
+            // Re-aplicar acción
+            if (action.type === 'ADD_HIGHLIGHT') {
+                const hl = action.payload;
+                this.highlights[hl.id] = hl;
+                if (!this.highlightsByPage[hl.page]) {
+                    this.highlightsByPage[hl.page] = [];
+                }
+                this.highlightsByPage[hl.page].push(hl.id);
+            } else if (action.type === 'REMOVE_HIGHLIGHT') {
+                const hl = action.payload.highlight;
+                delete this.highlights[hl.id];
+                const pageHighlights = this.highlightsByPage[hl.page];
+                if (pageHighlights) {
+                    const index = pageHighlights.indexOf(hl.id);
+                    if (index > -1) pageHighlights.splice(index, 1);
+                }
             }
+
+            this.renderHighlights(this.currentPage);
+            this.updateUndoRedoButtons();
+            this.markDirty();
         }
 
-        updateUndoRedoButtons() {
-            this.container.find('.spv-undo').prop('disabled', this.historyStep <= 0);
-            this.container.find('.spv-redo').prop('disabled', this.historyStep >= this.history.length - 1);
+        selectHighlightColor(color, colorName) {
+            this.currentColor = color;
+            this.eraserMode = false;
+
+            // Actualizar UI
+            $('.spv-color-btn', this.container).removeClass('active');
+            $(`#hl-${colorName}`, this.container).addClass('active');
+            $('#hl-erase', this.container).removeClass('active');
+
+            this.container.removeClass('spv-eraser-mode');
         }
 
-        updateToolButtons() {
-            this.container.find('.spv-highlight-tool, .spv-eraser-tool, .spv-select-tool').removeClass('active');
+        toggleEraserMode() {
+            this.eraserMode = !this.eraserMode;
+            this.currentColor = null;
 
-            if (this.currentTool === 'highlight') {
-                this.container.find('.spv-highlight-tool').addClass('active');
-            } else if (this.currentTool === 'eraser') {
-                this.container.find('.spv-eraser-tool').addClass('active');
+            // Actualizar UI
+            if (this.eraserMode) {
+                $('.spv-color-btn', this.container).removeClass('active');
+                $('#hl-erase', this.container).addClass('active');
+                this.container.addClass('spv-eraser-mode');
             } else {
-                this.container.find('.spv-select-tool').addClass('active');
+                $('#hl-erase', this.container).removeClass('active');
+                this.container.removeClass('spv-eraser-mode');
             }
+        }
+
+        prevPage() {
+            if (this.currentPage > 1 && !this.rendering) {
+                this.renderPage(this.currentPage - 1);
+            }
+        }
+
+        nextPage() {
+            if (this.currentPage < this.totalPages && !this.rendering) {
+                this.renderPage(this.currentPage + 1);
+            }
+        }
+
+        zoomIn() {
+            this.scale = Math.min(this.scale + 0.1, this.maxScale);
+            this.updateZoomLabel();
+            this.renderPage(this.currentPage);
+        }
+
+        zoomOut() {
+            this.scale = Math.max(this.scale - 0.1, this.minScale);
+            this.updateZoomLabel();
+            this.renderPage(this.currentPage);
+        }
+
+        updateZoomLabel() {
+            const percent = Math.round(this.scale * 100);
+            $('#zoom-label', this.container).text(percent + '%');
         }
 
         toggleFullscreen() {
@@ -417,7 +638,7 @@
         }
 
         updateFullscreenButton() {
-            const icon = this.container.find('.spv-fullscreen .dashicons');
+            const icon = $('#btn-fullscreen .dashicons', this.container);
             if (this.isFullscreen) {
                 icon.removeClass('dashicons-fullscreen-alt').addClass('dashicons-fullscreen-exit-alt');
             } else {
@@ -425,89 +646,154 @@
             }
         }
 
-        addWatermark() {
-            // Obtener datos del usuario
-            const userData = this.container.data('user-info') || {};
-            const userName = userData.name || 'Usuario';
-            const userEmail = userData.email || '';
-            const currentDate = new Date().toLocaleDateString();
-
-            // Crear overlay de marca de agua
-            const watermark = $('<div class="spv-watermark"></div>');
-            watermark.html(`
-                <div class="spv-watermark-content">
-                    <span class="dashicons dashicons-admin-users"></span>
-                    ${userName}<br>
-                    <small>${userEmail}</small><br>
-                    <small>${currentDate}</small>
-                </div>
-            `);
-
-            this.canvasContainer.append(watermark);
+        markDirty() {
+            this.isDirty = true;
+            this.scheduleAutosave();
         }
 
-        async saveAnnotations() {
-            // Guardar anotaciones en el servidor vía AJAX
-            const self = this;
-            const pdfId = this.container.data('pdf-id');
+        scheduleAutosave() {
+            if (this.autosaveTimer) {
+                clearTimeout(this.autosaveTimer);
+            }
 
-            $.ajax({
-                url: spvAjax.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'spv_save_annotations',
-                    nonce: spvAjax.nonce,
-                    pdf_id: pdfId,
-                    annotations: JSON.stringify(this.annotations)
-                },
-                success: function(response) {
-                    if (response.success) {
-                        self.container.find('.spv-save-message').remove();
-                        self.container.find('.spv-controls').append(
-                            '<span class="spv-save-message" style="color: #2ecc71; margin-left: 10px;">✓ Guardado</span>'
-                        );
-                        setTimeout(function() {
-                            self.container.find('.spv-save-message').fadeOut(function() {
-                                $(this).remove();
-                            });
-                        }, 2000);
+            this.autosaveTimer = setTimeout(() => {
+                this.saveAnnotations(false);
+            }, 1500); // 1.5 segundos
+        }
+
+        async saveAnnotations(manual = false) {
+            if (!this.isDirty && !manual) return;
+
+            const saveStatus = $('#save-status', this.container);
+            saveStatus.removeClass('saved error').addClass('visible saving').text('Guardando...');
+
+            const annotationsData = {
+                userId: this.userId,
+                pdfId: this.pdfId,
+                highlights: Object.values(this.highlights),
+                lastSavedAt: Date.now()
+            };
+
+            try {
+                // Guardar en localStorage
+                localStorage.setItem(
+                    `micea_pdf_annotations_${this.userId}_${this.pdfId}`,
+                    JSON.stringify(annotationsData)
+                );
+
+                // Intentar guardar en servidor
+                await $.ajax({
+                    url: spvAjax.ajax_url,
+                    type: 'POST',
+                    data: {
+                        action: 'spv_save_annotations',
+                        nonce: spvAjax.nonce,
+                        pdf_id: this.pdfId,
+                        annotations: JSON.stringify(annotationsData)
                     }
-                },
-                error: function() {
-                    alert('Error al guardar anotaciones. Inténtalo de nuevo.');
-                }
-            });
+                });
+
+                this.isDirty = false;
+                this.lastSavedAt = Date.now();
+
+                const time = new Date().toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                saveStatus.removeClass('saving').addClass('saved').text(`Guardado ✓ ${time}`);
+
+                setTimeout(() => {
+                    saveStatus.removeClass('visible');
+                }, 3000);
+
+            } catch (error) {
+                console.error('Error guardando anotaciones:', error);
+                saveStatus.removeClass('saving').addClass('error').text('Error al guardar');
+
+                setTimeout(() => {
+                    saveStatus.removeClass('visible');
+                }, 3000);
+            }
         }
 
         async loadUserAnnotations() {
-            // Cargar anotaciones guardadas del usuario
-            const self = this;
-            const pdfId = this.container.data('pdf-id');
+            try {
+                // Intentar cargar desde localStorage primero
+                const localData = localStorage.getItem(
+                    `micea_pdf_annotations_${this.userId}_${this.pdfId}`
+                );
 
-            if (!pdfId) return;
-
-            $.ajax({
-                url: spvAjax.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'spv_load_annotations',
-                    nonce: spvAjax.nonce,
-                    pdf_id: pdfId
-                },
-                success: function(response) {
-                    if (response.success && response.data.annotations) {
-                        self.annotations = JSON.parse(response.data.annotations);
-                        self.redrawAnnotations();
-
-                        // Inicializar historial con estado cargado
-                        self.history = [{
-                            page: self.currentPage,
-                            state: JSON.parse(JSON.stringify(self.annotations))
-                        }];
-                        self.historyStep = 0;
-                    }
+                if (localData) {
+                    const data = JSON.parse(localData);
+                    this.restoreAnnotations(data);
                 }
+
+                // Intentar cargar desde servidor
+                const response = await $.ajax({
+                    url: spvAjax.ajax_url,
+                    type: 'POST',
+                    data: {
+                        action: 'spv_load_annotations',
+                        nonce: spvAjax.nonce,
+                        pdf_id: this.pdfId
+                    }
+                });
+
+                if (response.success && response.data.annotations) {
+                    const data = JSON.parse(response.data.annotations);
+                    this.restoreAnnotations(data);
+                }
+
+            } catch (error) {
+                console.error('Error cargando anotaciones:', error);
+            }
+        }
+
+        restoreAnnotations(data) {
+            if (!data || !data.highlights) return;
+
+            // Restaurar highlights
+            this.highlights = {};
+            this.highlightsByPage = {};
+
+            data.highlights.forEach(hl => {
+                this.highlights[hl.id] = hl;
+
+                if (!this.highlightsByPage[hl.page]) {
+                    this.highlightsByPage[hl.page] = [];
+                }
+                this.highlightsByPage[hl.page].push(hl.id);
             });
+
+            // Inicializar undo/redo
+            this.undoStack = [];
+            this.redoStack = [];
+
+            // Re-renderizar
+            if (this.currentPage) {
+                this.renderHighlights(this.currentPage);
+            }
+
+            this.lastSavedAt = data.lastSavedAt;
+            this.isDirty = false;
+
+            this.updateUndoRedoButtons();
+        }
+
+        updateUndoRedoButtons() {
+            $('#btn-undo', this.container).prop('disabled', this.undoStack.length === 0);
+            $('#btn-redo', this.container).prop('disabled', this.redoStack.length === 0);
+        }
+
+        updateButtons() {
+            $('#btn-prev', this.container).prop('disabled', this.currentPage <= 1);
+            $('#btn-next', this.container).prop('disabled', this.currentPage >= this.totalPages);
+        }
+
+        updatePageInfo() {
+            $('.spv-current-page', this.container).text(this.currentPage);
+            $('.spv-total-pages', this.container).text(this.totalPages);
         }
 
         preventCopyPaste() {
@@ -518,35 +804,6 @@
                 'user-select': 'none',
                 '-webkit-touch-callout': 'none'
             });
-
-            const self = this;
-            $(document).on('keydown', function(e) {
-                if (!self.container.is(':visible')) return;
-
-                if ((e.ctrlKey || e.metaKey) &&
-                    (e.key === 's' || e.key === 'p' || e.key === 'c')) {
-                    e.preventDefault();
-                    return false;
-                }
-            });
-        }
-
-        updatePageInfo() {
-            this.container.find('.spv-current-page').text(this.currentPage);
-            this.container.find('.spv-total-pages').text(this.totalPages);
-        }
-
-        updateButtons() {
-            const prevBtn = this.container.find('.spv-prev');
-            const nextBtn = this.container.find('.spv-next');
-
-            prevBtn.prop('disabled', this.currentPage <= 1);
-            nextBtn.prop('disabled', this.currentPage >= this.totalPages);
-        }
-
-        updateZoomLevel() {
-            const zoomPercent = Math.round(this.scale * 100);
-            this.container.find('.spv-zoom-level').text(zoomPercent + '%');
         }
 
         showLoading() {
@@ -561,16 +818,17 @@
             this.hideLoading();
             this.container.find('.spv-error').remove();
             this.container.find('.spv-canvas-container').prepend(
-                '<div class="spv-error" style="position: absolute; top: 20px; left: 20px; right: 20px; z-index: 100;">' +
+                '<div class="spv-error" style="position: absolute; top: 20px; left: 20px; right: 20px; z-index: 100; background: #e74c3c; color: white; padding: 15px; border-radius: 4px; text-align: center;">' +
                 message +
                 '</div>'
             );
         }
     }
 
+    // Inicializar al cargar el documento
     $(document).ready(function() {
         $('.spv-viewer-container').each(function() {
-            new SecurePDFViewer(this);
+            new MiceaPDFViewer(this);
         });
     });
 

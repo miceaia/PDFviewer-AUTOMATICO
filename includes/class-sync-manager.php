@@ -48,6 +48,11 @@ class CloudSync_Manager {
     const CRON_HOOK = 'cloudsync_check_remote_changes';
 
     /**
+     * WordPress cron hook used to refresh OAuth access tokens.
+     */
+    const TOKEN_REFRESH_HOOK = 'cloudsync_refresh_tokens';
+
+    /**
      * Google Drive connector instance.
      *
      * @var Connector_GoogleDrive
@@ -98,8 +103,15 @@ class CloudSync_Manager {
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
 
         add_action( self::CRON_HOOK, array( $this, 'pull_remote_changes' ) );
+        add_action( self::TOKEN_REFRESH_HOOK, array( $this, 'refresh_service_tokens' ) );
 
         $this->ensure_cron_schedule();
+        $this->ensure_token_refresh_schedule();
+
+        if ( defined( 'WP_CLI' ) && WP_CLI ) {
+            \WP_CLI::add_command( 'cloudsync:sync', array( $this, 'cli_sync' ) );
+            \WP_CLI::add_command( 'cloudsync:reset-tokens', array( $this, 'cli_reset_tokens' ) );
+        }
 
         $this->explorer->init();
     }
@@ -169,12 +181,12 @@ class CloudSync_Manager {
             'google_client_id',
             'google_client_secret',
             'google_refresh_token',
-            'dropbox_app_key',
-            'dropbox_app_secret',
+            'dropbox_client_id',
+            'dropbox_client_secret',
             'dropbox_refresh_token',
+            'sharepoint_tenant_id',
             'sharepoint_client_id',
             'sharepoint_secret',
-            'sharepoint_tenant_id',
             'sharepoint_refresh_token',
         );
 
@@ -184,7 +196,7 @@ class CloudSync_Manager {
 
         cloudsync_save_settings( $clean );
 
-        return get_option( 'cloudsync_settings', array() );
+        return cloudsync_get_settings();
     }
 
     /**
@@ -294,6 +306,19 @@ class CloudSync_Manager {
 
         wp_schedule_event( time() + MINUTE_IN_SECONDS, $schedule, self::CRON_HOOK );
         update_option( 'cloudsync_current_schedule', $schedule );
+    }
+
+    /**
+     * Ensures the hourly token refresh event exists.
+     *
+     * @since 4.3.0
+     *
+     * @return void
+     */
+    protected function ensure_token_refresh_schedule() {
+        if ( ! wp_next_scheduled( self::TOKEN_REFRESH_HOOK ) ) {
+            wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', self::TOKEN_REFRESH_HOOK );
+        }
     }
 
     /**
@@ -842,7 +867,7 @@ class CloudSync_Manager {
                         'client_id'     => $settings['google_client_id'],
                         'redirect_uri'  => $this->get_oauth_redirect_uri( 'google' ),
                         'response_type' => 'code',
-                        'scope'         => 'https://www.googleapis.com/auth/drive.file',
+                        'scope'         => 'https://www.googleapis.com/auth/drive',
                         'access_type'   => 'offline',
                         'prompt'        => 'consent',
                         'state'         => $state,
@@ -854,7 +879,7 @@ class CloudSync_Manager {
                 exit;
 
             case 'dropbox':
-                if ( empty( $settings['dropbox_app_key'] ) || empty( $settings['dropbox_app_secret'] ) ) {
+                if ( empty( $settings['dropbox_client_id'] ) || empty( $settings['dropbox_client_secret'] ) ) {
                     wp_safe_redirect( $redirect_back );
                     exit;
                 }
@@ -862,9 +887,10 @@ class CloudSync_Manager {
                 $state    = wp_create_nonce( 'cloudsync_oauth_state_dropbox' );
                 $auth_url = add_query_arg(
                     array(
-                        'client_id'         => $settings['dropbox_app_key'],
+                        'client_id'         => $settings['dropbox_client_id'],
                         'redirect_uri'      => $this->get_oauth_redirect_uri( 'dropbox' ),
                         'response_type'     => 'code',
+                        'scope'             => 'files.metadata.read files.metadata.write',
                         'token_access_type' => 'offline',
                         'state'             => $state,
                     ),
@@ -888,7 +914,7 @@ class CloudSync_Manager {
                         'response_type' => 'code',
                         'redirect_uri'  => $this->get_oauth_redirect_uri( 'sharepoint' ),
                         'response_mode' => 'query',
-                        'scope'         => 'offline_access Files.ReadWrite.All Sites.ReadWrite.All',
+                        'scope'         => 'offline_access https://graph.microsoft.com/.default',
                         'state'         => $state,
                     ),
                     sprintf( 'https://login.microsoftonline.com/%s/oauth2/v2.0/authorize', rawurlencode( $tenant ) )
@@ -966,8 +992,8 @@ class CloudSync_Manager {
                 $endpoint = 'https://api.dropboxapi.com/oauth2/token';
                 $body     = array(
                     'code'          => $code,
-                    'client_id'     => $settings['dropbox_app_key'],
-                    'client_secret' => $settings['dropbox_app_secret'],
+                    'client_id'     => $settings['dropbox_client_id'],
+                    'client_secret' => $settings['dropbox_client_secret'],
                     'redirect_uri'  => $redirect_uri,
                     'grant_type'    => 'authorization_code',
                 );
@@ -982,7 +1008,7 @@ class CloudSync_Manager {
                     'client_secret' => $settings['sharepoint_secret'],
                     'redirect_uri'  => $redirect_uri,
                     'grant_type'    => 'authorization_code',
-                    'scope'         => 'offline_access Files.ReadWrite.All Sites.ReadWrite.All',
+                    'scope'         => 'offline_access https://graph.microsoft.com/.default',
                 );
                 break;
 
@@ -1082,13 +1108,13 @@ class CloudSync_Manager {
                 break;
 
             case 'dropbox':
-                if ( $token && ! empty( $settings['dropbox_app_key'] ) && ! empty( $settings['dropbox_app_secret'] ) ) {
+                if ( $token && ! empty( $settings['dropbox_client_id'] ) && ! empty( $settings['dropbox_client_secret'] ) ) {
                     wp_remote_post(
                         'https://api.dropboxapi.com/2/oauth2/token/revoke',
                         array(
                             'body'    => array( 'token' => $token ),
                             'headers' => array(
-                                'Authorization' => 'Basic ' . base64_encode( $settings['dropbox_app_key'] . ':' . $settings['dropbox_app_secret'] ),
+                                'Authorization' => 'Basic ' . base64_encode( $settings['dropbox_client_id'] . ':' . $settings['dropbox_client_secret'] ),
                             ),
                         )
                     );
@@ -1320,6 +1346,111 @@ class CloudSync_Manager {
 
         wp_safe_redirect( add_query_arg( array( 'page' => 'cloudsync-dashboard-advanced', 'cloudsync_notice' => 'rebuild' ), admin_url( 'admin.php' ) ) );
         exit;
+    }
+
+    /**
+     * Refreshes stored access tokens for each connector.
+     *
+     * @since 4.3.0
+     *
+     * @return void
+     */
+    public function refresh_service_tokens() {
+        $services = array(
+            'google'     => $this->google,
+            'dropbox'    => $this->dropbox,
+            'sharepoint' => $this->sharepoint,
+        );
+
+        foreach ( $services as $slug => $connector ) {
+            if ( ! $connector || ! method_exists( $connector, 'get_access_token' ) ) {
+                continue;
+            }
+
+            $credentials = cloudsync_get_service_credentials( $slug );
+
+            if ( empty( $credentials['refresh_token'] ) ) {
+                continue;
+            }
+
+            $token = $connector->get_access_token();
+
+            if ( empty( $token ) ) {
+                cloudsync_add_log(
+                    sprintf( __( 'No fue posible actualizar el token de %s.', 'secure-pdf-viewer' ), ucfirst( $slug ) ),
+                    array( 'service' => $slug )
+                );
+            }
+        }
+    }
+
+    /**
+     * WP-CLI command to trigger a remote synchronisation immediately.
+     *
+     * @since 4.3.0
+     *
+     * @param array<int, mixed>    $args       Positional arguments.
+     * @param array<string, mixed> $assoc_args Named arguments.
+     *
+     * @return void
+     */
+    public function cli_sync( $args, $assoc_args ) { // phpcs:ignore VariableAnalysis.CodeAnalysis.VariableAnalysis.UnusedVariable
+        $this->pull_remote_changes();
+
+        if ( defined( 'WP_CLI' ) && WP_CLI ) {
+            \WP_CLI::success( __( 'Sincronización ejecutada correctamente.', 'secure-pdf-viewer' ) );
+        }
+    }
+
+    /**
+     * WP-CLI command to clear stored OAuth tokens.
+     *
+     * @since 4.3.0
+     *
+     * @param array<int, mixed>    $args       Positional arguments.
+     * @param array<string, mixed> $assoc_args Named arguments (supports --service=google|dropbox|sharepoint).
+     *
+     * @return void
+     */
+    public function cli_reset_tokens( $args, $assoc_args ) { // phpcs:ignore VariableAnalysis.CodeAnalysis.VariableAnalysis.UnusedVariable
+        $allowed  = array( 'google', 'dropbox', 'sharepoint' );
+        $services = $allowed;
+
+        if ( isset( $assoc_args['service'] ) ) {
+            $service = sanitize_key( $assoc_args['service'] );
+
+            if ( ! in_array( $service, $allowed, true ) ) {
+                if ( defined( 'WP_CLI' ) && WP_CLI ) {
+                    \WP_CLI::error( sprintf( __( 'Servicio desconocido: %s', 'secure-pdf-viewer' ), $service ) );
+                }
+
+                return;
+            }
+
+            $services = array( $service );
+        }
+
+        foreach ( $services as $service ) {
+            cloudsync_store_service_credentials(
+                $service,
+                array(
+                    'refresh_token' => '',
+                    'access_token'  => '',
+                    'token_expires' => 0,
+                ),
+                false
+            );
+        }
+
+        cloudsync_add_log( __( 'OAuth tokens cleared via WP-CLI.', 'secure-pdf-viewer' ), array( 'services' => $services ) );
+
+        if ( defined( 'WP_CLI' ) && WP_CLI ) {
+            if ( 1 === count( $services ) ) {
+                \WP_CLI::success( sprintf( __( 'Tokens reiniciados para %s.', 'secure-pdf-viewer' ), $services[0] ) );
+            } else {
+                \WP_CLI::success( __( 'Se reiniciaron los tokens de todos los servicios.', 'secure-pdf-viewer' ) );
+            }
+        }
     }
 
     /**

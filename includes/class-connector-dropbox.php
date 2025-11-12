@@ -9,6 +9,10 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
+if ( ! class_exists( 'CloudSync_Dropbox', false ) ) {
+    class_alias( 'Connector_Dropbox', 'CloudSync_Dropbox' );
+}
+
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/interface-cloudsync-connector.php';
 
@@ -309,27 +313,54 @@ class Connector_Dropbox implements CloudSync_Connector_Interface {
     }
 
     /**
-     * Exchanges the refresh token for an access token.
+     * Retrieves a valid Dropbox access token, refreshing when required.
      *
-     * @since 4.0.0
+     * @since 4.3.0
      *
-     * @return string Access token or empty string.
+     * @return string OAuth access token.
      */
-    protected function get_access_token() {
-        $settings = cloudsync_get_settings();
+    public function get_access_token() {
+        $credentials = cloudsync_get_service_credentials( 'dropbox' );
 
-        if ( empty( $settings['dropbox_refresh_token'] ) || empty( $settings['dropbox_app_key'] ) || empty( $settings['dropbox_app_secret'] ) ) {
+        if ( empty( $credentials['client_id'] ) || empty( $credentials['client_secret'] ) ) {
             return '';
         }
 
+        $access_token  = isset( $credentials['access_token'] ) ? $credentials['access_token'] : '';
+        $token_expires = isset( $credentials['token_expires'] ) ? (int) $credentials['token_expires'] : 0;
+
+        if ( $access_token && $token_expires > ( time() + 60 ) ) {
+            return $access_token;
+        }
+
+        if ( empty( $credentials['refresh_token'] ) ) {
+            return '';
+        }
+
+        return $this->refresh_access_token( $credentials );
+    }
+
+    /**
+     * Refreshes the Dropbox access token using the stored refresh token.
+     *
+     * @since 4.3.0
+     *
+     * @param array<string, mixed> $credentials Stored credential set.
+     *
+     * @return string Access token or empty string when refresh fails.
+     */
+    protected function refresh_access_token( array $credentials ) {
         $response = wp_remote_post(
             'https://api.dropboxapi.com/oauth2/token',
             array(
-                'body' => array(
+                'timeout' => 20,
+                'headers' => array(
+                    'Authorization' => 'Basic ' . base64_encode( $credentials['client_id'] . ':' . $credentials['client_secret'] ),
+                    'Content-Type'  => 'application/x-www-form-urlencoded',
+                ),
+                'body'    => array(
                     'grant_type'    => 'refresh_token',
-                    'refresh_token' => $settings['dropbox_refresh_token'],
-                    'client_id'     => $settings['dropbox_app_key'],
-                    'client_secret' => $settings['dropbox_app_secret'],
+                    'refresh_token' => $credentials['refresh_token'],
                 ),
             )
         );
@@ -339,12 +370,106 @@ class Connector_Dropbox implements CloudSync_Connector_Interface {
                 __( 'Dropbox token refresh failed', 'secure-pdf-viewer' ),
                 array( 'error' => $response->get_error_message() )
             );
+
             return '';
         }
 
         $data = json_decode( wp_remote_retrieve_body( $response ), true );
 
-        return isset( $data['access_token'] ) ? $data['access_token'] : '';
+        if ( empty( $data['access_token'] ) ) {
+            cloudsync_add_log( __( 'Dropbox returned an empty access token.', 'secure-pdf-viewer' ), array( 'response' => $data ) );
+            return '';
+        }
+
+        $expires = isset( $data['expires_in'] ) ? (int) $data['expires_in'] : 14400;
+
+        $updates = array(
+            'access_token'  => $data['access_token'],
+            'token_expires' => time() + $expires,
+        );
+
+        if ( ! empty( $data['refresh_token'] ) ) {
+            $updates['refresh_token'] = $data['refresh_token'];
+        }
+
+        cloudsync_store_service_credentials( 'dropbox', $updates );
+
+        return $data['access_token'];
+    }
+
+    /**
+     * Exchanges an OAuth code for Dropbox tokens.
+     *
+     * @since 4.3.0
+     *
+     * @param string $code Authorisation code returned by Dropbox.
+     *
+     * @return array<string, mixed>|\WP_Error
+     */
+    public function exchange_code_for_tokens( $code ) {
+        $credentials = cloudsync_get_service_credentials( 'dropbox' );
+
+        if ( empty( $credentials['client_id'] ) || empty( $credentials['client_secret'] ) ) {
+            return new WP_Error( 'cloudsync_dropbox_missing_keys', __( 'Configura el App Key y Secret antes de autorizar Dropbox.', 'secure-pdf-viewer' ) );
+        }
+
+        $response = wp_remote_post(
+            'https://api.dropboxapi.com/oauth2/token',
+            array(
+                'timeout' => 20,
+                'headers' => array(
+                    'Authorization' => 'Basic ' . base64_encode( $credentials['client_id'] . ':' . $credentials['client_secret'] ),
+                    'Content-Type'  => 'application/x-www-form-urlencoded',
+                ),
+                'body'    => array(
+                    'code'              => $code,
+                    'grant_type'        => 'authorization_code',
+                    'redirect_uri'      => cloudsync_get_oauth_redirect_uri( 'dropbox' ),
+                    'token_access_type' => 'offline',
+                ),
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            return $response;
+        }
+
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+
+        if ( empty( $body ) || ! is_array( $body ) ) {
+            return new WP_Error( 'cloudsync_dropbox_empty_response', __( 'Dropbox devolvió una respuesta vacía durante el intercambio de tokens.', 'secure-pdf-viewer' ) );
+        }
+
+        return $body;
+    }
+
+    /**
+     * Stores Dropbox tokens from the OAuth callback payload.
+     *
+     * @since 4.3.0
+     *
+     * @param array<string, mixed> $tokens Token payload returned by Dropbox.
+     *
+     * @return void
+     */
+    public function oauth_callback( array $tokens ) {
+        $updates = array();
+
+        if ( ! empty( $tokens['access_token'] ) ) {
+            $updates['access_token'] = $tokens['access_token'];
+        }
+
+        if ( ! empty( $tokens['refresh_token'] ) ) {
+            $updates['refresh_token'] = $tokens['refresh_token'];
+        }
+
+        if ( ! empty( $tokens['expires_in'] ) ) {
+            $updates['token_expires'] = time() + (int) $tokens['expires_in'];
+        }
+
+        cloudsync_store_service_credentials( 'dropbox', $updates );
+
+        cloudsync_add_log( __( 'Dropbox tokens stored from OAuth callback.', 'secure-pdf-viewer' ), array( 'service' => 'dropbox' ) );
     }
 
     /**

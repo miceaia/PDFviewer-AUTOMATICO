@@ -10,6 +10,29 @@
     flex-direction: column;
 }
 
+/* Fullscreen mode */
+.spv-viewer-container:fullscreen {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+}
+
+.spv-viewer-container:-webkit-full-screen {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.spv-viewer-container:-moz-full-screen {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.spv-viewer-container:-ms-fullscreen {
+    width: 100% !important;
+    height: 100% !important;
+}
+
 .spv-title {
     margin: 0;
     padding: 15px 20px;
@@ -32,6 +55,12 @@
     flex-wrap: wrap;
     gap: 10px;
     flex-shrink: 0;
+}
+
+.spv-control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 /* BOTONES CON EL COLOR DE TU WEB - TURQUESA */
@@ -66,6 +95,11 @@
     opacity: 0.6;
 }
 
+.spv-btn.active {
+    background: #e74c3c;
+    box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.5);
+}
+
 .spv-page-info {
     font-weight: bold;
     color: #ecf0f1;
@@ -82,6 +116,41 @@
     text-align: center;
     font-weight: bold;
     color: #ecf0f1;
+}
+
+/* Herramientas de anotación */
+.spv-annotation-tools {
+    background: rgba(0,0,0,0.1);
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+
+.spv-color-picker {
+    width: 40px;
+    height: 32px;
+    border: 2px solid white;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px;
+}
+
+.spv-color-presets {
+    display: flex;
+    gap: 4px;
+}
+
+.spv-color-preset {
+    width: 24px;
+    height: 24px;
+    border: 2px solid white;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.spv-color-preset:hover {
+    transform: scale(1.2);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
 .spv-canvas-container {
@@ -103,6 +172,46 @@
     background: white;
     max-width: 100%;
     height: auto;
+}
+
+.spv-annotation-canvas {
+    cursor: crosshair;
+}
+
+/* Marca de agua */
+.spv-watermark {
+    position: absolute;
+    bottom: 30px;
+    right: 30px;
+    background: rgba(0,0,0,0.7);
+    color: rgba(255,255,255,0.6);
+    padding: 10px 15px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    pointer-events: none;
+    z-index: 5;
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.spv-watermark-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spv-watermark .dashicons {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+    opacity: 0.6;
+}
+
+.spv-watermark small {
+    display: block;
+    font-size: 9px;
+    opacity: 0.7;
 }
 
 .spv-loading {
@@ -150,20 +259,66 @@
     margin: 10px 0;
 }
 
+.spv-save-message {
+    font-weight: bold;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 /* Responsive */
+@media (max-width: 1024px) {
+    .spv-controls {
+        gap: 5px;
+    }
+
+    .spv-control-group {
+        gap: 5px;
+    }
+
+    .spv-btn {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+
+    .spv-color-presets {
+        display: none; /* Ocultar presets en pantallas pequeñas */
+    }
+}
+
 @media (max-width: 768px) {
     .spv-controls {
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
+        padding: 8px;
     }
-    
+
+    .spv-control-group {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .spv-annotation-tools {
+        flex-wrap: wrap;
+    }
+
     .spv-btn {
-        font-size: 12px;
-        padding: 6px 12px;
+        font-size: 11px;
+        padding: 5px 8px;
     }
-    
+
     .spv-canvas-container {
         padding: 10px;
+    }
+
+    .spv-watermark {
+        bottom: 15px;
+        right: 15px;
+        font-size: 9px;
+        padding: 8px 10px;
     }
 }
 
@@ -181,4 +336,19 @@
 
 .spv-btn:hover:not(:disabled) .dashicons {
     transform: scale(1.1);
+}
+
+/* Mejoras visuales para fullscreen */
+.spv-viewer-container:fullscreen .spv-canvas-container,
+.spv-viewer-container:-webkit-full-screen .spv-canvas-container,
+.spv-viewer-container:-moz-full-screen .spv-canvas-container,
+.spv-viewer-container:-ms-fullscreen .spv-canvas-container {
+    padding: 40px;
+}
+
+.spv-viewer-container:fullscreen .spv-controls,
+.spv-viewer-container:-webkit-full-screen .spv-controls,
+.spv-viewer-container:-moz-full-screen .spv-controls,
+.spv-viewer-container:-ms-fullscreen .spv-controls {
+    padding: 15px 30px;
 }

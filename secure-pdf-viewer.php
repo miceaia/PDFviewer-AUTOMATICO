@@ -28,6 +28,8 @@ require_once SPV_PLUGIN_PATH . 'includes/class-gutenberg-block.php';
 require_once SPV_PLUGIN_PATH . 'includes/helpers.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-sync-manager.php';
 require_once SPV_PLUGIN_PATH . 'includes/admin-handlers.php';
+require_once SPV_PLUGIN_PATH . 'includes/class-annotations-handler.php';
+require_once SPV_PLUGIN_PATH . 'includes/class-learndash-integration.php';
 
 class SecurePDFViewer {
     
@@ -44,6 +46,13 @@ class SecurePDFViewer {
     private $cloudsync_manager;
 
     /**
+     * Integración con LearnDash.
+     *
+     * @var CloudSync_LearnDash_Integration
+     */
+    private $learndash_integration;
+
+    /**
      * Returns the CloudSync manager instance.
      *
      * @since 4.1.2
@@ -52,6 +61,17 @@ class SecurePDFViewer {
      */
     public function get_cloudsync_manager() {
         return $this->cloudsync_manager;
+    }
+
+    /**
+     * Returns the LearnDash integration instance.
+     *
+     * @since 4.4.0
+     *
+     * @return CloudSync_LearnDash_Integration
+     */
+    public function get_learndash_integration() {
+        return $this->learndash_integration;
     }
     
     public static function get_instance() {
@@ -86,10 +106,18 @@ class SecurePDFViewer {
         $this->gutenberg_block   = new SPV_Gutenberg_Block();
         $this->cloudsync_manager = new CloudSync_Manager();
 
+        // Inicializar integración con LearnDash
+        $this->learndash_integration = new CloudSync_LearnDash_Integration($this->cloudsync_manager);
+
         $this->pdf_viewer->init();
         $this->shortcode_handler->init();
         $this->gutenberg_block->init();
         $this->cloudsync_manager->init();
+        $this->learndash_integration->init();
+
+        // Log de inicialización
+        error_log('[CloudSync] Plugin initialized - LearnDash Integration: ' .
+                  ($this->learndash_integration->is_learndash_active() ? 'Active' : 'Inactive'));
     }
     
     public function register_assets() {
@@ -105,16 +133,22 @@ class SecurePDFViewer {
         if (is_admin()) {
             return;
         }
-        
+
         // Encolar siempre
         wp_enqueue_script('jquery');
         wp_enqueue_script('pdf-js');
         wp_enqueue_script('spv-viewer');
         wp_enqueue_style('spv-style');
         wp_enqueue_style('dashicons');
-        
+
+        // Pasar datos AJAX al JavaScript
+        wp_localize_script('spv-viewer', 'spvAjax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce'    => wp_create_nonce('spv_ajax_nonce')
+        ));
+
         // Log para debug (visible en consola)
-        wp_add_inline_script('spv-viewer', 'console.log("SPV: Assets loaded v3.0.0");', 'before');
+        wp_add_inline_script('spv-viewer', 'console.log("SPV: Assets loaded v3.1.0");', 'before');
     }
     
     public function ensure_assets_loaded() {

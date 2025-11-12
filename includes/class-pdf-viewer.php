@@ -29,111 +29,134 @@ class SPV_PDF_Viewer {
                 <h3 class="spv-title"><?php echo esc_html($title); ?></h3>
             <?php endif; ?>
 
-            <div class="spv-controls">
-                <!-- Navegación -->
-                <div class="spv-control-group">
-                    <button type="button" id="btn-prev" class="spv-btn spv-prev" disabled
+            <!-- Barra superior compacta minimalista -->
+            <div class="spv-toolbar">
+                <!-- Navegación de páginas -->
+                <div class="spv-toolbar-group">
+                    <button type="button" id="btn-prev" class="spv-toolbar-btn" disabled
                             title="<?php _e('Página anterior (←)', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Página anterior', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-arrow-left-alt2" aria-hidden="true"></span>
                     </button>
 
-                    <span id="page-counter" class="spv-page-info" role="status" aria-live="polite">
-                        <span class="spv-current-page">1</span> /
-                        <span class="spv-total-pages">0</span>
-                    </span>
-
-                    <button type="button" id="btn-next" class="spv-btn spv-next" disabled
+                    <button type="button" id="btn-next" class="spv-toolbar-btn" disabled
                             title="<?php _e('Página siguiente (→)', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Página siguiente', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-arrow-right-alt2" aria-hidden="true"></span>
                     </button>
                 </div>
 
-                <!-- Herramientas de anotación - Colores de subrayado -->
-                <div class="spv-control-group spv-annotation-tools">
-                    <button type="button" id="hl-yellow" class="spv-btn spv-color-btn" data-color="#ffff00"
-                            style="background: #ffff00; color: #333;"
-                            title="<?php _e('Subrayar en amarillo', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Subrayar en amarillo', 'secure-pdf-viewer'); ?>">
+                <div class="spv-toolbar-divider"></div>
+
+                <!-- Contador de páginas -->
+                <span id="page-counter" class="spv-page-counter" role="status" aria-live="polite">
+                    <span class="spv-current-page">1</span> / <span class="spv-total-pages">0</span>
+                </span>
+
+                <div class="spv-toolbar-divider"></div>
+
+                <!-- Subrayado con dropdown -->
+                <div class="spv-highlight-container">
+                    <button type="button" id="btn-highlight" class="spv-toolbar-btn spv-highlight-btn"
+                            title="<?php _e('Subrayar texto', 'secure-pdf-viewer'); ?>"
+                            aria-label="<?php _e('Subrayar texto', 'secure-pdf-viewer'); ?>"
+                            aria-expanded="false"
+                            aria-haspopup="true">
                         <span class="dashicons dashicons-edit" aria-hidden="true"></span>
+                        <span class="spv-btn-text"><?php _e('Subrayar', 'secure-pdf-viewer'); ?></span>
+                        <span class="dashicons dashicons-arrow-down-alt2" aria-hidden="true"></span>
                     </button>
 
-                    <button type="button" id="hl-green" class="spv-btn spv-color-btn" data-color="#00ff00"
-                            style="background: #00ff00; color: #333;"
-                            title="<?php _e('Subrayar en verde', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Subrayar en verde', 'secure-pdf-viewer'); ?>">
-                        <span class="dashicons dashicons-edit" aria-hidden="true"></span>
-                    </button>
-
-                    <button type="button" id="hl-blue" class="spv-btn spv-color-btn" data-color="#00bfff"
-                            style="background: #00bfff; color: #fff;"
-                            title="<?php _e('Subrayar en azul', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Subrayar en azul', 'secure-pdf-viewer'); ?>">
-                        <span class="dashicons dashicons-edit" aria-hidden="true"></span>
-                    </button>
-
-                    <button type="button" id="hl-pink" class="spv-btn spv-color-btn" data-color="#ff69b4"
-                            style="background: #ff69b4; color: #fff;"
-                            title="<?php _e('Subrayar en rosa', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Subrayar en rosa', 'secure-pdf-viewer'); ?>">
-                        <span class="dashicons dashicons-edit" aria-hidden="true"></span>
-                    </button>
-
-                    <button type="button" id="hl-erase" class="spv-btn spv-eraser-tool"
-                            title="<?php _e('Borrar subrayado', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Borrar subrayado', 'secure-pdf-viewer'); ?>">
-                        <span class="dashicons dashicons-editor-removeformatting" aria-hidden="true"></span>
-                    </button>
+                    <!-- Dropdown de colores -->
+                    <div id="highlight-dropdown" class="spv-highlight-dropdown" role="menu" aria-hidden="true">
+                        <button type="button" class="spv-color-option" data-color="#ffff00" role="menuitem"
+                                aria-label="<?php _e('Amarillo', 'secure-pdf-viewer'); ?>">
+                            <span class="spv-color-swatch" style="background: #ffff00;"></span>
+                            <span class="spv-color-name"><?php _e('Amarillo', 'secure-pdf-viewer'); ?></span>
+                        </button>
+                        <button type="button" class="spv-color-option" data-color="#00ff00" role="menuitem"
+                                aria-label="<?php _e('Verde', 'secure-pdf-viewer'); ?>">
+                            <span class="spv-color-swatch" style="background: #00ff00;"></span>
+                            <span class="spv-color-name"><?php _e('Verde', 'secure-pdf-viewer'); ?></span>
+                        </button>
+                        <button type="button" class="spv-color-option" data-color="#00bfff" role="menuitem"
+                                aria-label="<?php _e('Azul', 'secure-pdf-viewer'); ?>">
+                            <span class="spv-color-swatch" style="background: #00bfff;"></span>
+                            <span class="spv-color-name"><?php _e('Azul', 'secure-pdf-viewer'); ?></span>
+                        </button>
+                        <button type="button" class="spv-color-option" data-color="#ff69b4" role="menuitem"
+                                aria-label="<?php _e('Rosa', 'secure-pdf-viewer'); ?>">
+                            <span class="spv-color-swatch" style="background: #ff69b4;"></span>
+                            <span class="spv-color-name"><?php _e('Rosa', 'secure-pdf-viewer'); ?></span>
+                        </button>
+                        <button type="button" class="spv-color-option" data-color="#ff8c00" role="menuitem"
+                                aria-label="<?php _e('Naranja', 'secure-pdf-viewer'); ?>">
+                            <span class="spv-color-swatch" style="background: #ff8c00;"></span>
+                            <span class="spv-color-name"><?php _e('Naranja', 'secure-pdf-viewer'); ?></span>
+                        </button>
+                        <div class="spv-dropdown-divider"></div>
+                        <button type="button" id="btn-erase" class="spv-color-option spv-erase-option" role="menuitem"
+                                aria-label="<?php _e('Borrar subrayado', 'secure-pdf-viewer'); ?>">
+                            <span class="dashicons dashicons-editor-removeformatting" aria-hidden="true"></span>
+                            <span class="spv-color-name"><?php _e('Borrar', 'secure-pdf-viewer'); ?></span>
+                        </button>
+                    </div>
                 </div>
 
+                <div class="spv-toolbar-divider"></div>
+
                 <!-- Deshacer/Rehacer -->
-                <div class="spv-control-group">
-                    <button type="button" id="btn-undo" class="spv-btn spv-undo" disabled
+                <div class="spv-toolbar-group">
+                    <button type="button" id="btn-undo" class="spv-toolbar-btn" disabled
                             title="<?php _e('Deshacer (Ctrl+Z)', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Deshacer', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-undo" aria-hidden="true"></span>
                     </button>
 
-                    <button type="button" id="btn-redo" class="spv-btn spv-redo" disabled
+                    <button type="button" id="btn-redo" class="spv-toolbar-btn" disabled
                             title="<?php _e('Rehacer (Ctrl+Y)', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Rehacer', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-redo" aria-hidden="true"></span>
                     </button>
                 </div>
 
+                <div class="spv-toolbar-divider"></div>
+
                 <!-- Zoom -->
-                <div class="spv-control-group spv-zoom-controls">
-                    <button type="button" id="btn-zoom-out" class="spv-btn spv-zoom-out"
-                            title="<?php _e('Alejar', 'secure-pdf-viewer'); ?>"
+                <div class="spv-toolbar-group spv-zoom-group">
+                    <button type="button" id="btn-zoom-out" class="spv-toolbar-btn"
+                            title="<?php _e('Alejar (Ctrl+-)', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Alejar', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-minus" aria-hidden="true"></span>
                     </button>
-                    <span id="zoom-label" class="spv-zoom-level" role="status" aria-live="polite">150%</span>
-                    <button type="button" id="btn-zoom-in" class="spv-btn spv-zoom-in"
-                            title="<?php _e('Acercar', 'secure-pdf-viewer'); ?>"
+                    <span id="zoom-label" class="spv-zoom-label" role="status" aria-live="polite">150%</span>
+                    <button type="button" id="btn-zoom-in" class="spv-toolbar-btn"
+                            title="<?php _e('Acercar (Ctrl++)', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Acercar', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-plus" aria-hidden="true"></span>
                     </button>
                 </div>
 
-                <!-- Pantalla completa y Guardar -->
-                <div class="spv-control-group">
-                    <button type="button" id="btn-fullscreen" class="spv-btn spv-fullscreen"
-                            title="<?php _e('Pantalla completa (ESC para salir)', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Pantalla completa', 'secure-pdf-viewer'); ?>">
-                        <span class="dashicons dashicons-fullscreen-alt" aria-hidden="true"></span>
-                    </button>
+                <div class="spv-toolbar-divider"></div>
 
-                    <button type="button" id="btn-save" class="spv-btn spv-save-annotations"
-                            title="<?php _e('Guardar anotaciones', 'secure-pdf-viewer'); ?>"
-                            aria-label="<?php _e('Guardar anotaciones', 'secure-pdf-viewer'); ?>">
-                        <span class="dashicons dashicons-saved" aria-hidden="true"></span>
-                        <?php _e('Guardar', 'secure-pdf-viewer'); ?>
-                    </button>
+                <!-- Guardar -->
+                <button type="button" id="btn-save" class="spv-toolbar-btn spv-save-btn"
+                        title="<?php _e('Guardar anotaciones', 'secure-pdf-viewer'); ?>"
+                        aria-label="<?php _e('Guardar anotaciones', 'secure-pdf-viewer'); ?>">
+                    <span class="dashicons dashicons-saved" aria-hidden="true"></span>
+                    <span class="spv-btn-text"><?php _e('Guardar', 'secure-pdf-viewer'); ?></span>
+                </button>
 
-                    <span id="save-status" class="spv-save-status" role="status" aria-live="polite"></span>
-                </div>
+                <span id="save-status" class="spv-save-status" role="status" aria-live="polite"></span>
+
+                <div class="spv-toolbar-divider"></div>
+
+                <!-- Pantalla completa -->
+                <button type="button" id="btn-fullscreen" class="spv-toolbar-btn"
+                        title="<?php _e('Pantalla completa (ESC para salir)', 'secure-pdf-viewer'); ?>"
+                        aria-label="<?php _e('Pantalla completa', 'secure-pdf-viewer'); ?>">
+                    <span class="dashicons dashicons-fullscreen-alt" aria-hidden="true"></span>
+                </button>
             </div>
 
             <div class="spv-canvas-container">

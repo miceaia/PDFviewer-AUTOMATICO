@@ -52,6 +52,9 @@
             // Fullscreen
             this.isFullscreen = false;
 
+            // Dropdown state
+            this.dropdownOpen = false;
+
             this.init();
         }
 
@@ -244,26 +247,19 @@
         }
 
         addWatermarkToPage() {
-            const watermarkText = `Usuario: ${this.userName} · Fecha: ${new Date().toLocaleDateString()}`;
+            const watermarkText = `Usuario: ${this.userName} · Curso 2024-2025`;
 
-            // Dibujar marca de agua en el canvas
+            // Dibujar marca de agua en el canvas (esquina inferior derecha)
             this.ctx.save();
             this.ctx.globalAlpha = 0.15;
             this.ctx.fillStyle = '#000000';
-            this.ctx.font = '14px Arial';
-
-            const centerX = this.canvas.width / 2;
-            const centerY = this.canvas.height / 2;
-
-            this.ctx.translate(centerX, centerY);
-            this.ctx.rotate(-30 * Math.PI / 180);
+            this.ctx.font = '10px Arial';
 
             const textWidth = this.ctx.measureText(watermarkText).width;
-            this.ctx.fillText(watermarkText, -textWidth / 2, 0);
+            const x = this.canvas.width - textWidth - 20;
+            const y = this.canvas.height - 20;
 
-            // Repetir en esquinas
-            this.ctx.fillText(watermarkText, -textWidth / 2, -this.canvas.height / 3);
-            this.ctx.fillText(watermarkText, -textWidth / 2, this.canvas.height / 3);
+            this.ctx.fillText(watermarkText, x, y);
 
             this.ctx.restore();
         }
@@ -279,14 +275,23 @@
             $('#btn-zoom-in', this.container).on('click', () => this.zoomIn());
             $('#btn-zoom-out', this.container).on('click', () => this.zoomOut());
 
-            // Colores de highlight
-            $('#hl-yellow', this.container).on('click', () => this.selectHighlightColor('#ffff00', 'yellow'));
-            $('#hl-green', this.container).on('click', () => this.selectHighlightColor('#00ff00', 'green'));
-            $('#hl-blue', this.container).on('click', () => this.selectHighlightColor('#00bfff', 'blue'));
-            $('#hl-pink', this.container).on('click', () => this.selectHighlightColor('#ff69b4', 'pink'));
+            // Dropdown de highlight
+            $('#btn-highlight', this.container).on('click', (e) => {
+                e.stopPropagation();
+                this.toggleHighlightDropdown();
+            });
 
-            // Borrador
-            $('#hl-erase', this.container).on('click', () => this.toggleEraserMode());
+            // Opciones de color
+            $('.spv-color-option[data-color]', this.container).on('click', function() {
+                const color = $(this).data('color');
+                self.selectHighlightColor(color);
+            });
+
+            // Borrador (dentro del dropdown)
+            $('#btn-erase', this.container).on('click', () => {
+                this.toggleEraserMode();
+                this.closeHighlightDropdown();
+            });
 
             // Undo/Redo
             $('#btn-undo', this.container).on('click', () => this.undo());
@@ -301,6 +306,13 @@
             // Selección de texto
             $(this.textLayer).on('mouseup', () => {
                 setTimeout(() => this.handleTextSelection(), 10);
+            });
+
+            // Cerrar dropdown al hacer click fuera
+            $(document).on('click', (e) => {
+                if (this.dropdownOpen && !$(e.target).closest('.spv-highlight-container').length) {
+                    this.closeHighlightDropdown();
+                }
             });
 
             // Responsive
@@ -328,10 +340,51 @@
             });
         }
 
+        toggleHighlightDropdown() {
+            const dropdown = $('#highlight-dropdown', this.container);
+            const btn = $('#btn-highlight', this.container);
+
+            if (this.dropdownOpen) {
+                this.closeHighlightDropdown();
+            } else {
+                dropdown.removeClass('hide').addClass('show');
+                btn.attr('aria-expanded', 'true');
+                dropdown.attr('aria-hidden', 'false');
+                this.dropdownOpen = true;
+            }
+        }
+
+        closeHighlightDropdown() {
+            const dropdown = $('#highlight-dropdown', this.container);
+            const btn = $('#btn-highlight', this.container);
+
+            if (this.dropdownOpen) {
+                dropdown.removeClass('show').addClass('hide');
+                btn.attr('aria-expanded', 'false');
+                dropdown.attr('aria-hidden', 'true');
+
+                setTimeout(() => {
+                    dropdown.removeClass('hide').css('display', 'none');
+                }, 150);
+
+                this.dropdownOpen = false;
+            }
+        }
+
         bindKeyboardShortcuts() {
             $(document).on('keydown', (e) => {
                 // Solo si el visor está visible
                 if (!this.container.is(':visible')) return;
+
+                // Escape: cerrar dropdown o salir de fullscreen
+                if (e.key === 'Escape') {
+                    if (this.dropdownOpen) {
+                        e.preventDefault();
+                        this.closeHighlightDropdown();
+                        return false;
+                    }
+                    // El navegador maneja fullscreen automáticamente
+                }
 
                 // Undo: Ctrl+Z o Cmd+Z
                 if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
@@ -348,6 +401,20 @@
                     return false;
                 }
 
+                // Zoom In: Ctrl++ o Ctrl+=
+                if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=')) {
+                    e.preventDefault();
+                    this.zoomIn();
+                    return false;
+                }
+
+                // Zoom Out: Ctrl+-
+                if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+                    e.preventDefault();
+                    this.zoomOut();
+                    return false;
+                }
+
                 // Navegación con flechas
                 if (e.key === 'ArrowLeft') {
                     e.preventDefault();
@@ -359,11 +426,6 @@
                     e.preventDefault();
                     this.nextPage();
                     return false;
-                }
-
-                // Escape para salir de fullscreen
-                if (e.key === 'Escape' && this.isFullscreen) {
-                    // El navegador maneja esto automáticamente
                 }
 
                 // Prevenir Ctrl+S, Ctrl+P, Ctrl+C
@@ -555,16 +617,21 @@
             this.markDirty();
         }
 
-        selectHighlightColor(color, colorName) {
+        selectHighlightColor(color) {
             this.currentColor = color;
             this.eraserMode = false;
 
-            // Actualizar UI
-            $('.spv-color-btn', this.container).removeClass('active');
-            $(`#hl-${colorName}`, this.container).addClass('active');
-            $('#hl-erase', this.container).removeClass('active');
+            // Actualizar UI - marcar opción activa
+            $('.spv-color-option[data-color]', this.container).removeClass('active');
+            $(`.spv-color-option[data-color="${color}"]`, this.container).addClass('active');
+
+            // Actualizar botón principal
+            $('#btn-highlight', this.container).addClass('active');
 
             this.container.removeClass('spv-eraser-mode');
+
+            // Cerrar dropdown
+            this.closeHighlightDropdown();
         }
 
         toggleEraserMode() {
@@ -573,11 +640,10 @@
 
             // Actualizar UI
             if (this.eraserMode) {
-                $('.spv-color-btn', this.container).removeClass('active');
-                $('#hl-erase', this.container).addClass('active');
+                $('.spv-color-option[data-color]', this.container).removeClass('active');
+                $('#btn-highlight', this.container).removeClass('active');
                 this.container.addClass('spv-eraser-mode');
             } else {
-                $('#hl-erase', this.container).removeClass('active');
                 this.container.removeClass('spv-eraser-mode');
             }
         }
@@ -656,9 +722,10 @@
                 clearTimeout(this.autosaveTimer);
             }
 
+            // Autosave después de 3 segundos
             this.autosaveTimer = setTimeout(() => {
                 this.saveAnnotations(false);
-            }, 1500); // 1.5 segundos
+            }, 3000);
         }
 
         async saveAnnotations(manual = false) {
@@ -818,9 +885,7 @@
             this.hideLoading();
             this.container.find('.spv-error').remove();
             this.container.find('.spv-canvas-container').prepend(
-                '<div class="spv-error" style="position: absolute; top: 20px; left: 20px; right: 20px; z-index: 100; background: #e74c3c; color: white; padding: 15px; border-radius: 4px; text-align: center;">' +
-                message +
-                '</div>'
+                '<div class="spv-error">' + message + '</div>'
             );
         }
     }

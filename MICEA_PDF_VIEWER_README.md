@@ -2,15 +2,19 @@
 
 ## 📋 Descripción
 
-Visor PDF avanzado con sistema de subrayado inteligente basado en selección de texto, marca de agua dinámica, autosave y persistencia por usuario. Implementado con PDF.js + jQuery para WordPress.
+Visor PDF minimalista y funcional con sistema de subrayado inteligente basado en selección de texto, marca de agua dinámica, autosave y persistencia por usuario. Implementado con PDF.js + jQuery para WordPress.
+
+**Diseño**: Barra superior compacta (< 60px) con dropdown de colores, estilo limpio y responsive.
 
 ## ✨ Características Implementadas
 
-### 🎨 Subrayado de Texto Real
-- **Selección de texto nativa** con textLayer de PDF.js
-- **4 colores disponibles**: Amarillo, Verde, Azul, Rosa
+### 🎨 Subrayado de Texto Real con Dropdown
+- **Botón único con dropdown** (#btn-highlight) que despliega menú de colores
+- **5 colores disponibles**: Amarillo, Verde, Azul, Rosa, Naranja
+- **Animación fadeIn/fadeOut** al abrir/cerrar menú (0.2s ease)
+- **Cierre automático**: Click fuera del PDF o ESC
 - **Highlights con quads** que se ajustan al zoom
-- **Borrador inteligente**: click en highlights para eliminar
+- **Borrador integrado**: Opción en el dropdown para modo borrador
 
 ### ↩️ Undo/Redo Completo
 - **Stack de acciones** con historial completo
@@ -40,20 +44,21 @@ Visor PDF avanzado con sistema de subrayado inteligente basado en selección de 
 - **Icono dinámico** (expand/collapse)
 
 ### 💾 Persistencia y Autosave
-- **Autosave automático**: 1.5 segundos después de cambios
+- **Autosave automático**: 3 segundos después de cambios (debounce)
 - **Doble storage**: localStorage + servidor (Ajax)
-- **Indicador de estado**:
-  - "Guardando..." (naranja)
-  - "Guardado ✓ HH:MM" (verde)
-  - "Error al guardar" (rojo)
+- **Indicador de estado** (#save-status):
+  - "Guardando..." (naranja, clase `saving`)
+  - "Guardado ✓ HH:MM" (verde, clase `saved`)
+  - "Error al guardar" (rojo, clase `error`)
 - **Carga automática** al iniciar visor
 
 ### 💧 Marca de Agua Dinámica
 - **Por página**: Se dibuja en cada render
-- **Información**: Usuario + Fecha
-- **Rotación**: -30° diagonal
+- **Información**: "Usuario: [Nombre] · Curso 2024-2025"
+- **Ubicación**: Esquina inferior derecha
+- **Tamaño**: 10px (discreto)
 - **Opacidad**: 0.15 (sutil pero visible)
-- **Posiciones múltiples**: Centro + esquinas
+- **Estilo**: Sin rotación, alineado horizontalmente
 
 ### ⌨️ Atajos de Teclado
 | Atajo | Acción |
@@ -61,9 +66,11 @@ Visor PDF avanzado con sistema de subrayado inteligente basado en selección de 
 | `Ctrl/⌘ + Z` | Deshacer |
 | `Ctrl/⌘ + Y` | Rehacer |
 | `Ctrl/⌘ + Shift + Z` | Rehacer (alternativo) |
+| `Ctrl/⌘ + +` o `=` | Zoom in |
+| `Ctrl/⌘ + -` | Zoom out |
 | `←` | Página anterior |
 | `→` | Página siguiente |
-| `ESC` | Salir de pantalla completa |
+| `ESC` | Cerrar dropdown o salir de pantalla completa |
 
 **Bloqueados para seguridad**:
 - `Ctrl/⌘ + S`: Guardar (previene download)
@@ -152,14 +159,15 @@ Z-Index Layer Stack:
 #btn-next          → nextPage()
 #page-counter      → Indicador de página (read-only)
 
-// Colores de subrayado
-#hl-yellow         → selectHighlightColor('#ffff00', 'yellow')
-#hl-green          → selectHighlightColor('#00ff00', 'green')
-#hl-blue           → selectHighlightColor('#00bfff', 'blue')
-#hl-pink           → selectHighlightColor('#ff69b4', 'pink')
-
-// Borrador
-#hl-erase          → toggleEraserMode()
+// Subrayado (Dropdown)
+#btn-highlight          → toggleHighlightDropdown()
+#highlight-dropdown     → Menú desplegable
+  .spv-color-option[data-color="#ffff00"]  → Amarillo
+  .spv-color-option[data-color="#00ff00"]  → Verde
+  .spv-color-option[data-color="#00bfff"]  → Azul
+  .spv-color-option[data-color="#ff69b4"]  → Rosa
+  .spv-color-option[data-color="#ff8c00"]  → Naranja
+  #btn-erase                                → Borrador
 
 // Undo/Redo
 #btn-undo          → undo()
@@ -181,17 +189,20 @@ Z-Index Layer Stack:
 ## 🚀 Uso del Visor
 
 ### 1. Subrayar Texto
-1. Haz clic en un color (amarillo, verde, azul o rosa)
-2. El botón se marca como `active` (borde blanco)
-3. Selecciona texto en el PDF
-4. Al soltar el mouse, se crea el highlight automáticamente
-5. Se activa autosave después de 1.5s
+1. Haz clic en el botón **"Subrayar"** (con flecha hacia abajo)
+2. Se abre el dropdown con 5 colores disponibles
+3. Selecciona un color (amarillo, verde, azul, rosa o naranja)
+4. El dropdown se cierra y el botón "Subrayar" queda activo
+5. Selecciona texto en el PDF
+6. Al soltar el mouse, se crea el highlight automáticamente
+7. Se activa autosave después de 3 segundos
 
 ### 2. Borrar Subrayados
-1. Haz clic en el botón "Borrar" (goma de borrar)
-2. El visor entra en modo borrador (`spv-eraser-mode`)
-3. Haz clic en cualquier highlight para eliminarlo
-4. Se puede deshacer con Ctrl+Z
+1. Haz clic en el botón "Subrayar" para abrir el dropdown
+2. Selecciona la opción "Borrar" (con icono de goma de borrar, en rojo)
+3. El visor entra en modo borrador (`spv-eraser-mode`)
+4. Haz clic en cualquier highlight para eliminarlo
+5. Se puede deshacer con Ctrl+Z
 
 ### 3. Deshacer/Rehacer
 - **Deshacer**: Ctrl/⌘+Z o botón Deshacer
@@ -296,21 +307,26 @@ interface StorageProvider {
 
 ## ✅ Checklist de Aceptación (QA)
 
-- [x] Todos los botones responden al clic y teclado
-- [x] IDs correctos implementados (#hl-yellow, #btn-undo, etc.)
-- [x] Subrayado con selección de texto real (textLayer)
+- [x] Botón "Subrayar" abre dropdown con 5 colores
+- [x] Dropdown se cierra con click fuera o ESC
+- [x] Animación fadeIn/fadeOut funcional (0.2s)
+- [x] Subrayado funciona con texto real (no dibujo libre)
+- [x] Borrador en dropdown activa modo borrador
 - [x] Undo/Redo revierte/aplica correctamente
+- [x] Zoom con botones y atajos Ctrl+/- funciona
 - [x] Zoom actualiza #zoom-label y recalcula highlights
-- [x] Pantalla completa funciona con ESC
-- [x] Guardar persiste y autosave funciona con debounce 1.5s
+- [x] Pantalla completa mantiene barra visible
+- [x] Guardar persiste y autosave funciona con debounce 3s
 - [x] #save-status muestra estado correcto
 - [x] Navegación con botones y flechas
-- [x] Marca de agua visible en todas las páginas
-- [x] Z-index correctos (toolbar no bloqueada)
-- [x] Atajos de teclado funcionan (Ctrl+Z, Ctrl+Y, flechas)
-- [x] Accesibilidad básica (aria-labels, roles)
+- [x] Marca de agua en esquina inferior derecha (10px)
+- [x] Barra superior < 60px de altura
+- [x] Color base #24333F con hover #1ABC9C
+- [x] Z-index correctos (toolbar sticky z-index: 1000)
+- [x] Atajos de teclado funcionan
+- [x] Accesibilidad completa (aria-expanded, aria-haspopup)
 - [x] type="button" en todos los botones
-- [x] Sin errores en consola al cargar
+- [x] Sin errores en consola
 
 ## 🔐 Seguridad
 
@@ -357,8 +373,32 @@ Para reportar bugs o sugerir mejoras, contacta al equipo de desarrollo.
 
 Este código es parte del plugin WordPress "Secure PDF Viewer".
 
+## 🎨 Diseño de la Barra Superior
+
+### Layout Visual
+```
+[←] [→] | [📑 1/15] | [🖍️ Subrayar ▼] | [↩️] [↪️] | [−] [150%] [+] | [💾 Guardar] [Guardado ✓] | [⛶]
+```
+
+### Especificaciones de Diseño
+- **Color base**: #24333F (gris azulado oscuro)
+- **Hover**: #1ABC9C (turquesa/verde agua)
+- **Altura**: 56px (< 60px según especificación)
+- **Posición**: Sticky (permanece visible al hacer scroll)
+- **Z-index**: 1000
+- **Divisores**: Líneas verticales con opacidad 0.15
+- **Responsive**: Wrap en móviles, texto oculto en botones pequeños
+
+### Dropdown de Colores
+- **Posición**: Absoluta, debajo del botón "Subrayar"
+- **Fondo**: Blanco (#ffffff)
+- **Sombra**: `0 4px 16px rgba(0, 0, 0, 0.15)`
+- **Animación**: fadeInDropdown (0.2s ease)
+- **Min-width**: 180px
+- **Borde**: 1px solid #ddd, border-radius 6px
+
 ---
 
-**Versión**: 2.0.0 (Micea Edition)
+**Versión**: 2.1.0 (Micea Minimalista Edition)
 **Última actualización**: 2025-11-12
 **Desarrollado por**: Claude (Anthropic)

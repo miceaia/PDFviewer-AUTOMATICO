@@ -1,3 +1,8 @@
+/* ==========================================================================
+   Visor PDF Micea - Diseño Minimalista
+   ========================================================================== */
+
+/* Container principal */
 .spv-viewer-container {
     position: relative;
     border: 1px solid #ddd;
@@ -11,28 +16,18 @@
 }
 
 /* Fullscreen mode */
-.spv-viewer-container:fullscreen {
+.spv-viewer-container:fullscreen,
+.spv-viewer-container:-webkit-full-screen,
+.spv-viewer-container:-moz-full-screen,
+.spv-viewer-container:-ms-fullscreen {
     width: 100% !important;
     height: 100% !important;
     max-width: 100% !important;
     max-height: 100% !important;
+    border-radius: 0;
 }
 
-.spv-viewer-container:-webkit-full-screen {
-    width: 100% !important;
-    height: 100% !important;
-}
-
-.spv-viewer-container:-moz-full-screen {
-    width: 100% !important;
-    height: 100% !important;
-}
-
-.spv-viewer-container:-ms-fullscreen {
-    width: 100% !important;
-    height: 100% !important;
-}
-
+/* Título opcional */
 .spv-title {
     margin: 0;
     padding: 15px 20px;
@@ -44,85 +39,113 @@
     flex-shrink: 0;
 }
 
-.spv-controls {
+/* ==========================================================================
+   Toolbar Minimalista
+   ========================================================================== */
+
+.spv-toolbar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 10px 20px;
-    background: #34495e;
+    gap: 12px;
+    padding: 8px 16px;
+    background: #24333F;
     color: white;
-    border-bottom: 1px solid #ddd;
-    flex-wrap: wrap;
-    gap: 10px;
+    border-bottom: 2px solid #1a252f;
     flex-shrink: 0;
-    position: relative;
+    height: 56px;
+    box-sizing: border-box;
+    position: sticky;
+    top: 0;
     z-index: 1000;
 }
 
-.spv-control-group {
+.spv-toolbar-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
 }
 
-/* BOTONES CON EL COLOR DE TU WEB - TURQUESA */
-.spv-btn {
-    background: #1abc9c; /* Color turquesa de tu web */
-    color: white;
-    border: none;
-    padding: 8px 15px;
+.spv-toolbar-divider {
+    width: 1px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0 4px;
+}
+
+/* Botones de toolbar */
+.spv-toolbar-btn {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.9);
+    border: 1px solid transparent;
+    padding: 8px 12px;
     border-radius: 4px;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     font-size: 14px;
-    transition: all 0.3s ease;
-    font-weight: 500;
+    transition: all 0.2s ease;
+    font-weight: 400;
+    white-space: nowrap;
 }
 
-.spv-btn:hover:not(:disabled) {
-    background: #16a085; /* Versión más oscura al pasar el mouse */
+.spv-toolbar-btn .dashicons {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+}
+
+.spv-toolbar-btn:hover:not(:disabled) {
+    background: #1ABC9C;
+    color: white;
+    border-color: #1ABC9C;
     transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(26, 188, 156, 0.3);
 }
 
-.spv-btn:active:not(:disabled) {
+.spv-toolbar-btn:active:not(:disabled) {
     transform: translateY(0);
 }
 
-.spv-btn:disabled {
-    background: #95a5a6; /* Gris cuando está deshabilitado */
+.spv-toolbar-btn:disabled {
+    opacity: 0.4;
     cursor: not-allowed;
-    opacity: 0.6;
 }
 
-.spv-btn.active {
-    background: #e74c3c;
-    box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.5);
-    transform: scale(1.05);
+.spv-toolbar-btn.active {
+    background: #1ABC9C;
+    color: white;
+    border-color: #16a085;
 }
 
-/* Botones de color específicos */
-.spv-color-btn {
-    min-width: 40px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+/* Ocultar texto en botones pequeños en mobile */
+@media (max-width: 768px) {
+    .spv-btn-text {
+        display: none;
+    }
 }
 
-.spv-color-btn:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.8);
-    transform: translateY(-2px) scale(1.05);
+/* Contador de páginas */
+.spv-page-counter {
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    min-width: 60px;
+    text-align: center;
 }
 
-.spv-color-btn.active {
-    border: 3px solid #fff;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+/* Zoom label */
+.spv-zoom-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    min-width: 50px;
+    text-align: center;
 }
 
-/* Save status indicator */
+/* Save status */
 .spv-save-status {
     font-size: 12px;
-    color: #ecf0f1;
+    color: rgba(255, 255, 255, 0.8);
     margin-left: 8px;
     font-weight: 500;
     opacity: 0;
@@ -145,58 +168,126 @@
     color: #e74c3c;
 }
 
-.spv-page-info {
-    font-weight: bold;
-    color: #ecf0f1;
+/* ==========================================================================
+   Dropdown de Colores (Highlight)
+   ========================================================================== */
+
+.spv-highlight-container {
+    position: relative;
 }
 
-.spv-zoom-controls {
+.spv-highlight-btn .dashicons-arrow-down-alt2 {
+    font-size: 14px;
+    width: 14px;
+    height: 14px;
+    margin-left: -2px;
+}
+
+.spv-highlight-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    background: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    padding: 8px 0;
+    min-width: 180px;
+    z-index: 1100;
+    display: none;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.spv-highlight-dropdown.show {
+    display: block;
+    animation: fadeInDropdown 0.2s ease forwards;
+}
+
+@keyframes fadeInDropdown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.spv-highlight-dropdown.hide {
+    animation: fadeOutDropdown 0.15s ease forwards;
+}
+
+@keyframes fadeOutDropdown {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+}
+
+/* Opciones de color */
+.spv-color-option {
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 10px 16px;
     display: flex;
     align-items: center;
-    gap: 10px;
-}
-
-.spv-zoom-level {
-    min-width: 50px;
-    text-align: center;
-    font-weight: bold;
-    color: #ecf0f1;
-}
-
-/* Herramientas de anotación */
-.spv-annotation-tools {
-    background: rgba(0,0,0,0.1);
-    padding: 5px 10px;
-    border-radius: 4px;
-}
-
-.spv-color-picker {
-    width: 40px;
-    height: 32px;
-    border: 2px solid white;
-    border-radius: 4px;
+    gap: 12px;
     cursor: pointer;
-    padding: 2px;
+    font-size: 14px;
+    color: #333;
+    transition: background 0.15s ease;
+    text-align: left;
 }
 
-.spv-color-presets {
-    display: flex;
-    gap: 4px;
+.spv-color-option:hover {
+    background: #f5f5f5;
 }
 
-.spv-color-preset {
-    width: 24px;
-    height: 24px;
-    border: 2px solid white;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: transform 0.2s ease;
+.spv-color-option.active {
+    background: #e8f8f5;
+    font-weight: 600;
 }
 
-.spv-color-preset:hover {
-    transform: scale(1.2);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+.spv-color-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
 }
+
+.spv-color-name {
+    flex: 1;
+}
+
+.spv-dropdown-divider {
+    height: 1px;
+    background: #e0e0e0;
+    margin: 6px 0;
+}
+
+.spv-erase-option {
+    color: #e74c3c;
+}
+
+.spv-erase-option .dashicons {
+    font-size: 18px;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Canvas Container y Capas
+   ========================================================================== */
 
 .spv-canvas-container {
     position: relative;
@@ -217,12 +308,6 @@
     background: white;
     max-width: 100%;
     height: auto;
-}
-
-.spv-annotation-canvas {
-    cursor: text;
-    pointer-events: none;
-    z-index: 3;
 }
 
 /* Text layer para selección */
@@ -274,41 +359,30 @@
     cursor: crosshair;
 }
 
-/* Marca de agua */
+/* ==========================================================================
+   Marca de Agua
+   ========================================================================== */
+
 .spv-watermark {
     position: absolute;
-    bottom: 30px;
-    right: 30px;
-    background: rgba(0,0,0,0.7);
-    color: rgba(255,255,255,0.6);
-    padding: 10px 15px;
-    border-radius: 4px;
-    font-size: 11px;
-    line-height: 1.4;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0,0,0,0.5);
+    color: rgba(255,255,255,0.5);
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 10px;
+    line-height: 1.3;
     pointer-events: none;
     z-index: 5;
-    backdrop-filter: blur(5px);
+    backdrop-filter: blur(3px);
     border: 1px solid rgba(255,255,255,0.1);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-.spv-watermark-content {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.spv-watermark .dashicons {
-    font-size: 20px;
-    width: 20px;
-    height: 20px;
-    opacity: 0.6;
-}
-
-.spv-watermark small {
-    display: block;
-    font-size: 9px;
-    opacity: 0.7;
-}
+/* ==========================================================================
+   Loading y Error
+   ========================================================================== */
 
 .spv-loading {
     position: absolute;
@@ -323,7 +397,7 @@
 
 .spv-spinner {
     border: 4px solid #f3f3f3;
-    border-top: 4px solid #1abc9c; /* Spinner también en turquesa */
+    border-top: 4px solid #1ABC9C;
     border-radius: 50%;
     width: 40px;
     height: 40px;
@@ -336,6 +410,97 @@
     100% { transform: rotate(360deg); }
 }
 
+.spv-error {
+    background: #e74c3c;
+    color: white;
+    padding: 15px;
+    border-radius: 4px;
+    text-align: center;
+    margin: 10px 0;
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    right: 20px;
+    z-index: 100;
+}
+
+/* ==========================================================================
+   Fullscreen Adjustments
+   ========================================================================== */
+
+.spv-viewer-container:fullscreen .spv-canvas-container,
+.spv-viewer-container:-webkit-full-screen .spv-canvas-container,
+.spv-viewer-container:-moz-full-screen .spv-canvas-container,
+.spv-viewer-container:-ms-fullscreen .spv-canvas-container {
+    padding: 40px;
+}
+
+/* ==========================================================================
+   Responsive Design
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+    .spv-toolbar {
+        gap: 8px;
+        padding: 8px 12px;
+    }
+
+    .spv-toolbar-btn {
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+
+    .spv-toolbar-divider {
+        margin: 0 2px;
+    }
+}
+
+@media (max-width: 768px) {
+    .spv-toolbar {
+        gap: 6px;
+        padding: 6px 8px;
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 56px;
+    }
+
+    .spv-toolbar-btn {
+        padding: 6px 8px;
+        font-size: 12px;
+    }
+
+    .spv-toolbar-btn .dashicons {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+    }
+
+    .spv-page-counter,
+    .spv-zoom-label {
+        font-size: 12px;
+    }
+
+    .spv-canvas-container {
+        padding: 10px;
+    }
+
+    .spv-watermark {
+        bottom: 10px;
+        right: 10px;
+        font-size: 9px;
+        padding: 4px 8px;
+    }
+
+    .spv-highlight-dropdown {
+        left: auto;
+        right: 0;
+    }
+}
+
+/* ==========================================================================
+   Utilities
+   ========================================================================== */
+
 .spv-protection-overlay {
     position: absolute;
     top: 0;
@@ -346,105 +511,9 @@
     z-index: 10;
 }
 
-.spv-error {
-    background: #e74c3c;
-    color: white;
-    padding: 15px;
-    border-radius: 4px;
-    text-align: center;
-    margin: 10px 0;
-}
-
-.spv-save-message {
-    font-weight: bold;
-    animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-/* Responsive */
-@media (max-width: 1024px) {
-    .spv-controls {
-        gap: 5px;
-    }
-
-    .spv-control-group {
-        gap: 5px;
-    }
-
-    .spv-btn {
-        font-size: 12px;
-        padding: 6px 10px;
-    }
-
-    .spv-color-presets {
-        display: none; /* Ocultar presets en pantallas pequeñas */
-    }
-}
-
-@media (max-width: 768px) {
-    .spv-controls {
-        flex-direction: column;
-        gap: 8px;
-        padding: 8px;
-    }
-
-    .spv-control-group {
-        width: 100%;
-        justify-content: center;
-    }
-
-    .spv-annotation-tools {
-        flex-wrap: wrap;
-    }
-
-    .spv-btn {
-        font-size: 11px;
-        padding: 5px 8px;
-    }
-
-    .spv-canvas-container {
-        padding: 10px;
-    }
-
-    .spv-watermark {
-        bottom: 15px;
-        right: 15px;
-        font-size: 9px;
-        padding: 8px 10px;
-    }
-}
-
-/* Estilos para dashicons */
+/* Dashicons base */
 .dashicons {
-    font-size: 16px;
-    width: 16px;
-    height: 16px;
-}
-
-/* Animación adicional para los iconos */
-.spv-btn .dashicons {
-    transition: transform 0.3s ease;
-}
-
-.spv-btn:hover:not(:disabled) .dashicons {
-    transform: scale(1.1);
-}
-
-/* Mejoras visuales para fullscreen */
-.spv-viewer-container:fullscreen .spv-canvas-container,
-.spv-viewer-container:-webkit-full-screen .spv-canvas-container,
-.spv-viewer-container:-moz-full-screen .spv-canvas-container,
-.spv-viewer-container:-ms-fullscreen .spv-canvas-container {
-    padding: 40px;
-}
-
-.spv-viewer-container:fullscreen .spv-controls,
-.spv-viewer-container:-webkit-full-screen .spv-controls,
-.spv-viewer-container:-moz-full-screen .spv-controls,
-.spv-viewer-container:-ms-fullscreen .spv-controls {
-    padding: 15px 30px;
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
 }

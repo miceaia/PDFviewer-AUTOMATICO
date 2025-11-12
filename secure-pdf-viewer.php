@@ -3,7 +3,7 @@
  * Plugin Name: Secure PDF Viewer
  * Plugin URI: https://miceanou.com
  * Description: Visualizador seguro de PDFs con selector de medios integrado
- * Version: 3.1.0
+ * Version: 3.2.0
  * Author: miceanou
  * License: GPL v2 or later
  * Text Domain: secure-pdf-viewer
@@ -19,7 +19,7 @@ if (!defined('ABSPATH')) {
 // Definir constantes del plugin
 define('SPV_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('SPV_PLUGIN_PATH', plugin_dir_path(__FILE__));
-define('SPV_PLUGIN_VERSION', '3.1.0');
+define('SPV_PLUGIN_VERSION', '3.2.0');
 
 // Cargar clases necesarias
 require_once SPV_PLUGIN_PATH . 'includes/class-pdf-viewer.php';

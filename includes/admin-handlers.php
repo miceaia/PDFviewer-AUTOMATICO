@@ -90,6 +90,14 @@ function cloudsync_handle_save_credentials(): void {
 
         check_admin_referer( 'cloudsync_credentials_nonce' );
 
+        // SECURITY FIX: Clean any corrupted credentials before attempting to save
+        if ( function_exists( 'cloudsync_clean_corrupted_credentials' ) ) {
+            $cleaned = cloudsync_clean_corrupted_credentials();
+            if ( $cleaned > 0 ) {
+                error_log( sprintf( '[CloudSync] Auto-cleaned %d corrupted credential(s) before save', $cleaned ) );
+            }
+        }
+
         $service = isset( $_POST['service'] ) ? sanitize_key( wp_unslash( $_POST['service'] ) ) : '';
 
         $allowed_services = array( 'google', 'dropbox', 'sharepoint' );

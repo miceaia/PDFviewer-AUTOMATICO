@@ -358,8 +358,21 @@ function cloudsync_store_service_credentials( $service, array $values, $preserve
         // Aquí $candidate es un valor NUEVO en texto plano que necesita encriptarse
         $value = $candidate;
 
+        // SECURITY: Validate input size before encryption to prevent corruption
+        if ( is_string( $value ) && strlen( $value ) > 8000 ) {
+            error_log( sprintf( '[CloudSync] ERROR: Refusing to save oversized credential %s.%s (%d bytes) - input too large', $service, $field, strlen( $value ) ) );
+            continue; // Skip this field to prevent corruption
+        }
+
         if ( in_array( $field, $sensitive_fields, true ) ) {
             $stored = '' === $value ? '' : cloudsync_encrypt( (string) $value );
+
+            // SECURITY: Validate encrypted size before saving
+            if ( '' !== $stored && strlen( $stored ) > 10000 ) {
+                error_log( sprintf( '[CloudSync] ERROR: Refusing to save oversized encrypted credential %s.%s (%d bytes) - possible multi-encryption', $service, $field, strlen( $stored ) ) );
+                continue; // Skip this field to prevent corruption
+            }
+
             cloudsync_opt_set( $option_name, $stored );
         } elseif ( 'token_expires' === $field ) {
             cloudsync_opt_set( $option_name, (int) $value );
@@ -377,6 +390,9 @@ function cloudsync_store_service_credentials( $service, array $values, $preserve
  * FIX: Obtiene valores YA ENCRIPTADOS directamente de las opciones para evitar doble encriptación.
  * No debe usar cloudsync_get_service_credentials() que desencripta los valores.
  *
+ * SECURITY FIX: Validates data size before saving to prevent memory exhaustion and database errors.
+ * Skips saving if the serialized data exceeds safe limits.
+ *
  * @since 4.3.0
  *
  * @return void
@@ -391,6 +407,14 @@ function cloudsync_refresh_legacy_settings_cache() {
     foreach ( $map['google']['fields'] as $field => $suffix ) {
         $option_name = $map['google']['prefix'] . '_' . $suffix;
         $stored      = cloudsync_opt_get( $option_name, '' );
+
+        // SECURITY: Skip if individual field is suspiciously large (likely corrupted/multi-encrypted)
+        if ( is_string( $stored ) && strlen( $stored ) > 10000 ) {
+            error_log( sprintf( '[CloudSync] WARNING: Skipping oversized credential field %s (%d bytes) - possible corruption', $option_name, strlen( $stored ) ) );
+            $stored = ''; // Clear corrupted value
+            delete_option( $option_name ); // Remove corrupted credential from database
+        }
+
         $legacy_key  = 'google_' . ( 'client_secret' === $field ? 'client_secret' : ( 'client_id' === $field ? 'client_id' : ( 'refresh_token' === $field ? 'refresh_token' : ( 'access_token' === $field ? 'access_token' : ( 'token_expires' === $field ? 'token_expires' : $field ) ) ) ) );
 
         if ( 'token_expires' === $field ) {
@@ -404,6 +428,14 @@ function cloudsync_refresh_legacy_settings_cache() {
     foreach ( $map['dropbox']['fields'] as $field => $suffix ) {
         $option_name = $map['dropbox']['prefix'] . '_' . $suffix;
         $stored      = cloudsync_opt_get( $option_name, '' );
+
+        // SECURITY: Skip if individual field is suspiciously large (likely corrupted/multi-encrypted)
+        if ( is_string( $stored ) && strlen( $stored ) > 10000 ) {
+            error_log( sprintf( '[CloudSync] WARNING: Skipping oversized credential field %s (%d bytes) - possible corruption', $option_name, strlen( $stored ) ) );
+            $stored = ''; // Clear corrupted value
+            delete_option( $option_name ); // Remove corrupted credential from database
+        }
+
         $legacy_key  = 'dropbox_' . ( 'client_secret' === $field ? 'client_secret' : ( 'client_id' === $field ? 'client_id' : ( 'refresh_token' === $field ? 'refresh_token' : ( 'access_token' === $field ? 'access_token' : ( 'token_expires' === $field ? 'token_expires' : $field ) ) ) ) );
 
         if ( 'token_expires' === $field ) {
@@ -418,6 +450,13 @@ function cloudsync_refresh_legacy_settings_cache() {
         $option_name = $map['sharepoint']['prefix'] . '_' . $suffix;
         $stored      = cloudsync_opt_get( $option_name, '' );
 
+        // SECURITY: Skip if individual field is suspiciously large (likely corrupted/multi-encrypted)
+        if ( is_string( $stored ) && strlen( $stored ) > 10000 ) {
+            error_log( sprintf( '[CloudSync] WARNING: Skipping oversized credential field %s (%d bytes) - possible corruption', $option_name, strlen( $stored ) ) );
+            $stored = ''; // Clear corrupted value
+            delete_option( $option_name ); // Remove corrupted credential from database
+        }
+
         if ( 'client_secret' === $field ) {
             $legacy_key = 'sharepoint_secret';
         } elseif ( 'tenant_id' === $field ) {
@@ -431,6 +470,21 @@ function cloudsync_refresh_legacy_settings_cache() {
         } else {
             $data[ $legacy_key ] = $stored; // Ya está encriptado si es sensible
         }
+    }
+
+    // SECURITY: Check total serialized size before saving to prevent database/memory errors
+    $serialized = maybe_serialize( $data );
+    $size = strlen( $serialized );
+
+    // Max safe size: 64KB (well below typical max_allowed_packet of 1-4MB)
+    // This accounts for WordPress overhead and other data in the query
+    if ( $size > 65536 ) {
+        error_log( sprintf( '[CloudSync] CRITICAL: Refusing to save cloudsync_settings - serialized size %d bytes exceeds safe limit. Credentials may be corrupted. Use cloudsync_clear_all_credentials() to reset.', $size ) );
+        return; // Skip saving to prevent database error
+    }
+
+    if ( $size > 32768 ) {
+        error_log( sprintf( '[CloudSync] WARNING: cloudsync_settings is large (%d bytes). This may indicate corrupted credentials.', $size ) );
     }
 
     cloudsync_opt_set( 'cloudsync_settings', $data );
@@ -812,6 +866,58 @@ function cloudsync_prepare_name( $name, $post_id ) {
     $name = apply_filters( 'cloudsync_course_folder_name', $name, $post_id );
 
     return wp_strip_all_tags( $name );
+}
+
+/**
+ * Detects and cleans corrupted credentials that exceed safe size limits.
+ *
+ * This function scans all credential fields and removes any that are suspiciously large,
+ * which typically indicates multi-encryption or other corruption.
+ *
+ * @since 4.3.2
+ *
+ * @return int Number of corrupted fields cleaned.
+ */
+function cloudsync_clean_corrupted_credentials() {
+    $map = cloudsync_get_service_option_map();
+    $cleaned_count = 0;
+
+    foreach ( $map as $service => $config ) {
+        foreach ( $config['fields'] as $field => $suffix ) {
+            $option_name = $config['prefix'] . '_' . $suffix;
+            $stored = cloudsync_opt_get( $option_name, '' );
+
+            // Check if field is suspiciously large (> 10KB indicates corruption)
+            if ( is_string( $stored ) && strlen( $stored ) > 10000 ) {
+                error_log( sprintf( '[CloudSync] Cleaning corrupted credential %s (%d bytes)', $option_name, strlen( $stored ) ) );
+                delete_option( $option_name );
+                $cleaned_count++;
+            }
+        }
+    }
+
+    // Also check and clean the legacy aggregated option if it's too large
+    $legacy = get_option( 'cloudsync_settings', '' );
+    if ( is_string( $legacy ) ) {
+        $legacy_size = strlen( $legacy );
+    } elseif ( is_array( $legacy ) ) {
+        $legacy_size = strlen( maybe_serialize( $legacy ) );
+    } else {
+        $legacy_size = 0;
+    }
+
+    if ( $legacy_size > 65536 ) {
+        error_log( sprintf( '[CloudSync] Cleaning oversized legacy settings (%d bytes)', $legacy_size ) );
+        delete_option( 'cloudsync_settings' );
+        $cleaned_count++;
+    }
+
+    if ( $cleaned_count > 0 ) {
+        error_log( sprintf( '[CloudSync] Cleaned %d corrupted credential field(s)', $cleaned_count ) );
+        cloudsync_refresh_legacy_settings_cache(); // Rebuild from remaining clean data
+    }
+
+    return $cleaned_count;
 }
 
 /**

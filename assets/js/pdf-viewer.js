@@ -15,11 +15,14 @@
             this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
 
+            // Obtener configuraciones globales
+            this.settings = typeof spvSettings !== 'undefined' ? spvSettings : {};
+
             // PDF.js
             this.pdfDoc = null;
             this.currentPage = 1;
             this.totalPages = 0;
-            this.scale = 1.5;
+            this.scale = parseFloat(this.settings.default_zoom) || 1.5;
             this.rendering = false;
             this.maxScale = 3.0;
             this.minScale = 0.5;
@@ -247,20 +250,81 @@
         }
 
         addWatermarkToPage() {
-            const watermarkText = `Usuario: ${this.userName} · Curso 2024-2025`;
+            // Construir texto de marca de agua según configuración
+            const parts = [];
 
-            // Dibujar marca de agua en el canvas (esquina inferior derecha)
+            if (this.settings.watermark_show_user) {
+                parts.push(`Usuario: ${this.userName}`);
+            }
+
+            if (this.settings.watermark_show_email) {
+                parts.push(this.userEmail);
+            }
+
+            if (this.settings.watermark_show_date) {
+                parts.push(`Fecha: ${new Date().toLocaleDateString()}`);
+            }
+
+            if (this.settings.watermark_custom_text) {
+                parts.push(this.settings.watermark_custom_text);
+            }
+
+            if (parts.length === 0) {
+                return; // No mostrar marca de agua si no hay texto
+            }
+
+            const watermarkText = parts.join(' · ');
+
+            // Obtener configuración de estilo
+            const fontSize = parseInt(this.settings.watermark_font_size) || 10;
+            const opacity = parseFloat(this.settings.watermark_opacity) || 0.15;
+            const color = this.settings.watermark_color || '#000000';
+            const position = this.settings.watermark_position || 'bottom-right';
+
+            // Dibujar marca de agua en el canvas
             this.ctx.save();
-            this.ctx.globalAlpha = 0.15;
-            this.ctx.fillStyle = '#000000';
-            this.ctx.font = '10px Arial';
+            this.ctx.globalAlpha = opacity;
+            this.ctx.fillStyle = color;
+            this.ctx.font = `${fontSize}px Arial`;
 
             const textWidth = this.ctx.measureText(watermarkText).width;
-            const x = this.canvas.width - textWidth - 20;
-            const y = this.canvas.height - 20;
+            const padding = 20;
+
+            // Calcular posición según configuración
+            let x, y;
+            switch (position) {
+                case 'top-left':
+                    x = padding;
+                    y = padding + fontSize;
+                    break;
+                case 'top-center':
+                    x = (this.canvas.width - textWidth) / 2;
+                    y = padding + fontSize;
+                    break;
+                case 'top-right':
+                    x = this.canvas.width - textWidth - padding;
+                    y = padding + fontSize;
+                    break;
+                case 'center':
+                    x = (this.canvas.width - textWidth) / 2;
+                    y = this.canvas.height / 2;
+                    break;
+                case 'bottom-left':
+                    x = padding;
+                    y = this.canvas.height - padding;
+                    break;
+                case 'bottom-center':
+                    x = (this.canvas.width - textWidth) / 2;
+                    y = this.canvas.height - padding;
+                    break;
+                case 'bottom-right':
+                default:
+                    x = this.canvas.width - textWidth - padding;
+                    y = this.canvas.height - padding;
+                    break;
+            }
 
             this.ctx.fillText(watermarkText, x, y);
-
             this.ctx.restore();
         }
 
@@ -722,10 +786,12 @@
                 clearTimeout(this.autosaveTimer);
             }
 
-            // Autosave después de 3 segundos
+            // Obtener tiempo de autosave desde configuración (en segundos)
+            const autosaveDelay = (parseInt(this.settings.autosave_delay) || 3) * 1000;
+
             this.autosaveTimer = setTimeout(() => {
                 this.saveAnnotations(false);
-            }, 3000);
+            }, autosaveDelay);
         }
 
         async saveAnnotations(manual = false) {

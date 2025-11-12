@@ -30,13 +30,15 @@ require_once SPV_PLUGIN_PATH . 'includes/class-sync-manager.php';
 require_once SPV_PLUGIN_PATH . 'includes/admin-handlers.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-annotations-handler.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-learndash-integration.php';
+require_once SPV_PLUGIN_PATH . 'includes/class-admin-settings.php';
 
 class SecurePDFViewer {
-    
+
     private static $instance = null;
     private $pdf_viewer;
     private $shortcode_handler;
     private $gutenberg_block;
+    private $admin_settings;
 
     /**
      * Administrador de sincronización en la nube.
@@ -105,6 +107,7 @@ class SecurePDFViewer {
         $this->shortcode_handler = new SPV_Shortcode_Handler();
         $this->gutenberg_block   = new SPV_Gutenberg_Block();
         $this->cloudsync_manager = new CloudSync_Manager();
+        $this->admin_settings    = new SPV_Admin_Settings();
 
         // Inicializar integración con LearnDash
         $this->learndash_integration = new CloudSync_LearnDash_Integration($this->cloudsync_manager);
@@ -141,11 +144,31 @@ class SecurePDFViewer {
         wp_enqueue_style('spv-style');
         wp_enqueue_style('dashicons');
 
+        // Obtener configuraciones del plugin
+        $settings = get_option('spv_settings', array());
+        $defaults = array(
+            'watermark_show_user' => 1,
+            'watermark_show_email' => 0,
+            'watermark_show_date' => 1,
+            'watermark_custom_text' => 'Curso 2024-2025',
+            'watermark_position' => 'bottom-right',
+            'watermark_font_size' => 10,
+            'watermark_opacity' => 0.15,
+            'watermark_color' => '#000000',
+            'default_zoom' => 1.5,
+            'autosave_delay' => 3,
+            'toolbar_color' => '#24333F',
+        );
+        $settings = wp_parse_args($settings, $defaults);
+
         // Pasar datos AJAX al JavaScript
         wp_localize_script('spv-viewer', 'spvAjax', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce'    => wp_create_nonce('spv_ajax_nonce')
         ));
+
+        // Pasar configuraciones al JavaScript
+        wp_localize_script('spv-viewer', 'spvSettings', $settings);
 
         // Log para debug (visible en consola)
         wp_add_inline_script('spv-viewer', 'console.log("SPV: Assets loaded v3.1.0");', 'before');

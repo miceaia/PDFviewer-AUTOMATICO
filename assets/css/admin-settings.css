@@ -1,0 +1,254 @@
+/* ==========================================================================
+   Admin Settings - PDF Viewer Micea
+   ========================================================================== */
+
+.spv-settings-wrap {
+    max-width: 1200px;
+    margin: 20px 20px 20px 0;
+}
+
+.spv-settings-header {
+    background: #fff;
+    border-left: 4px solid #1ABC9C;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.spv-settings-header .description {
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Formulario */
+.form-table {
+    background: #fff;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-top: 20px;
+}
+
+.form-table th {
+    width: 250px;
+    font-weight: 600;
+    padding: 15px 10px 15px 0;
+}
+
+.form-table td {
+    padding: 15px 10px;
+}
+
+/* Secciones */
+h2.title {
+    background: #24333F;
+    color: white;
+    padding: 15px 20px;
+    margin: 30px 0 0 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+h2.title:first-of-type {
+    margin-top: 20px;
+}
+
+/* Campos de formulario */
+input[type="text"].regular-text,
+input[type="number"],
+select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+input[type="text"].regular-text:focus,
+input[type="number"]:focus,
+select:focus {
+    border-color: #1ABC9C;
+    outline: none;
+    box-shadow: 0 0 0 1px #1ABC9C;
+}
+
+input[type="checkbox"] {
+    margin-right: 8px;
+    width: 18px;
+    height: 18px;
+    vertical-align: middle;
+}
+
+/* Color picker */
+.spv-color-picker {
+    max-width: 100px;
+}
+
+.wp-picker-container {
+    display: inline-block;
+}
+
+.wp-picker-container .button {
+    border-radius: 4px;
+    border-color: #ddd;
+}
+
+/* Description */
+.description {
+    color: #666;
+    font-size: 13px;
+    font-style: italic;
+    display: block;
+    margin-top: 5px;
+}
+
+/* Submit button */
+.submit {
+    padding: 10px 0;
+    background: #fff;
+    margin: 0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.submit .button-primary {
+    background: #1ABC9C;
+    border-color: #16a085;
+    text-shadow: none;
+    box-shadow: none;
+    padding: 10px 30px;
+    height: auto;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.submit .button-primary:hover {
+    background: #16a085;
+    border-color: #16a085;
+    transform: translateY(-1px);
+}
+
+.submit .button-primary:active {
+    transform: translateY(0);
+}
+
+/* Vista previa de marca de agua */
+.spv-settings-footer {
+    background: #fff;
+    padding: 20px;
+    margin-top: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-left: 4px solid #1ABC9C;
+}
+
+.spv-settings-footer h3 {
+    margin: 0 0 15px 0;
+    font-size: 16px;
+    color: #24333F;
+}
+
+.spv-watermark-preview {
+    background: #f5f5f5;
+    padding: 40px;
+    border-radius: 4px;
+    text-align: center;
+    border: 2px dashed #ddd;
+    min-height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spv-watermark-preview span {
+    font-family: Arial, sans-serif;
+    white-space: pre-wrap;
+}
+
+/* Settings errors/notices */
+.settings-error,
+.updated {
+    margin: 20px 0;
+    border-left-width: 4px;
+}
+
+.settings-error.error {
+    border-left-color: #dc3232;
+}
+
+.settings-error.updated {
+    border-left-color: #1ABC9C;
+}
+
+/* Responsive */
+@media screen and (max-width: 782px) {
+    .form-table th,
+    .form-table td {
+        display: block;
+        width: 100%;
+        padding: 10px 0;
+    }
+
+    .form-table th {
+        padding-bottom: 5px;
+    }
+
+    .form-table td {
+        padding-top: 5px;
+    }
+
+    .spv-settings-wrap {
+        margin-right: 0;
+    }
+}
+
+/* Animaciones */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.settings-error,
+.updated {
+    animation: fadeIn 0.3s ease;
+}
+
+/* Tooltips */
+.dashicons-editor-help {
+    color: #1ABC9C;
+    font-size: 18px;
+    vertical-align: middle;
+    cursor: help;
+}
+
+/* Grid para opciones de posición */
+.spv-position-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    max-width: 400px;
+    margin-top: 10px;
+}
+
+.spv-position-option {
+    padding: 10px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.spv-position-option:hover {
+    border-color: #1ABC9C;
+    background: #f0f9f7;
+}
+
+.spv-position-option.selected {
+    border-color: #1ABC9C;
+    background: #e8f8f5;
+    font-weight: 600;
+}

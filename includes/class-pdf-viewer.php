@@ -5,9 +5,23 @@ class SPV_PDF_Viewer {
         // Inicializar hooks si son necesarios
     }
 
-    public function render_viewer($pdf_url, $width = '100%', $height = '600px', $title = '', $class = '', $pdf_id = '') {
+    public function render_viewer($pdf_url, $width = '', $height = '', $title = '', $class = '', $pdf_id = '') {
         // ID único para el canvas
         $canvas_id = 'spv-pdf-canvas-' . uniqid();
+
+        // Obtener configuraciones
+        $settings = get_option('spv_settings', array());
+        $default_width = isset($settings['default_width']) ? $settings['default_width'] : '100%';
+        $default_height = isset($settings['default_height']) ? $settings['default_height'] : '600px';
+        $toolbar_color = isset($settings['toolbar_color']) ? $settings['toolbar_color'] : '#24333F';
+
+        // Usar valores por defecto si no se especifican
+        if (empty($width)) {
+            $width = $default_width;
+        }
+        if (empty($height)) {
+            $height = $default_height;
+        }
 
         // Obtener datos del usuario actual
         $current_user = wp_get_current_user();
@@ -30,7 +44,7 @@ class SPV_PDF_Viewer {
             <?php endif; ?>
 
             <!-- Barra superior compacta minimalista -->
-            <div class="spv-toolbar">
+            <div class="spv-toolbar" style="background-color: <?php echo esc_attr($toolbar_color); ?>">
                 <!-- Navegación de páginas -->
                 <div class="spv-toolbar-group">
                     <button type="button" id="btn-prev" class="spv-toolbar-btn" disabled

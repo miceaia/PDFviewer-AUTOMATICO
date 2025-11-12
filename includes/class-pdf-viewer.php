@@ -6,6 +6,12 @@ class SPV_PDF_Viewer {
     }
 
     public function render_viewer($pdf_url, $width = '100%', $height = '600px', $title = '', $class = '', $pdf_id = '') {
+        // Asegurar que los scripts estén cargados
+        wp_enqueue_style('dashicons');
+        wp_enqueue_style('spv-style');
+        wp_enqueue_script('pdf-js');
+        wp_enqueue_script('spv-viewer');
+
         // ID único para el canvas
         $canvas_id = 'spv-pdf-canvas-' . uniqid();
 

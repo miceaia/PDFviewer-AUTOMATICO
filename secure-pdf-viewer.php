@@ -28,6 +28,7 @@ require_once SPV_PLUGIN_PATH . 'includes/class-gutenberg-block.php';
 require_once SPV_PLUGIN_PATH . 'includes/helpers.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-sync-manager.php';
 require_once SPV_PLUGIN_PATH . 'includes/admin-handlers.php';
+require_once SPV_PLUGIN_PATH . 'includes/class-annotations-handler.php';
 
 class SecurePDFViewer {
     
@@ -105,16 +106,22 @@ class SecurePDFViewer {
         if (is_admin()) {
             return;
         }
-        
+
         // Encolar siempre
         wp_enqueue_script('jquery');
         wp_enqueue_script('pdf-js');
         wp_enqueue_script('spv-viewer');
         wp_enqueue_style('spv-style');
         wp_enqueue_style('dashicons');
-        
+
+        // Pasar datos AJAX al JavaScript
+        wp_localize_script('spv-viewer', 'spvAjax', array(
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce'    => wp_create_nonce('spv_ajax_nonce')
+        ));
+
         // Log para debug (visible en consola)
-        wp_add_inline_script('spv-viewer', 'console.log("SPV: Assets loaded v3.0.0");', 'before');
+        wp_add_inline_script('spv-viewer', 'console.log("SPV: Assets loaded v3.1.0");', 'before');
     }
     
     public function ensure_assets_loaded() {

@@ -18,11 +18,13 @@
             base_contrast: '#ffffff'
         },
         watermark_enabled: 1,
-        watermark_text: 'Usuario: {user_name} · Fecha: {date}',
+        watermark_text: 'Usuario: {{username}} · Fecha: {{date}}',
         watermark_color: '#000000',
         watermark_opacity: 0.15,
         watermark_font_size: 14,
+        watermark_font_family: 'Arial',
         watermark_rotation: -30,
+        watermark_position: 'center',
         copy_protection: 1
     };
 
@@ -385,6 +387,23 @@
             return luminance > 0.6 ? '#333333' : '#ffffff';
         }
 
+        getWatermarkPlaceholderValues() {
+            const now = new Date();
+            return {
+                username: this.userName,
+                user_name: this.userName,
+                name: this.userName,
+                email: this.userEmail,
+                user_email: this.userEmail,
+                userid: this.userId,
+                user_id: this.userId,
+                pdfid: this.pdfId,
+                pdf_id: this.pdfId,
+                date: now.toLocaleDateString(),
+                datetime: now.toLocaleString()
+            };
+        }
+
         getWatermarkText() {
             const template = this.preferences.watermark_text || '';
             if (!template) {
@@ -409,12 +428,40 @@
 
             let text = template;
 
-            Object.keys(replacements).forEach(token => {
-                const value = replacements[token] || '';
-                text = text.replace(new RegExp(token, 'g'), value);
+            return template.replace(/\{\{\s*([^}]+)\s*\}\}|\{([^}]+)\}/g, (match, doubleToken, singleToken) => {
+                const rawToken = (doubleToken || singleToken || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+                if (!rawToken) {
+                    return '';
+                }
+                return Object.prototype.hasOwnProperty.call(replacements, rawToken)
+                    ? replacements[rawToken]
+                    : '';
             });
+        }
 
-            return text;
+        getWatermarkPositions(position) {
+            const width = this.canvas.width;
+            const height = this.canvas.height;
+            const basePositions = {
+                center: [ { x: width / 2, y: height / 2 } ],
+                top_left: [ { x: width * 0.2, y: height * 0.2 } ],
+                top_right: [ { x: width * 0.8, y: height * 0.2 } ],
+                bottom_left: [ { x: width * 0.2, y: height * 0.8 } ],
+                bottom_right: [ { x: width * 0.8, y: height * 0.8 } ],
+                tile: [
+                    { x: width / 2, y: height / 2 },
+                    { x: width * 0.2, y: height * 0.2 },
+                    { x: width * 0.8, y: height * 0.2 },
+                    { x: width * 0.2, y: height * 0.8 },
+                    { x: width * 0.8, y: height * 0.8 }
+                ]
+            };
+
+            if (!position || !basePositions[position]) {
+                return basePositions.center;
+            }
+
+            return basePositions[position];
         }
 
         addWatermarkToPage() {
@@ -432,19 +479,26 @@
             this.ctx.globalAlpha = this.preferences.watermark_opacity || 0.15;
             this.ctx.fillStyle = this.preferences.watermark_color || '#000000';
             const fontSize = this.preferences.watermark_font_size || 14;
-            this.ctx.font = `${fontSize}px Arial`;
+            const fontFamily = this.preferences.watermark_font_family || 'Arial';
+            this.ctx.font = `${fontSize}px ${fontFamily}`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
 
-            const centerX = this.canvas.width / 2;
-            const centerY = this.canvas.height / 2;
+            const rotationRadians = ((typeof this.preferences.watermark_rotation === 'number'
+                ? this.preferences.watermark_rotation
+                : -30) * Math.PI) / 180;
 
-            this.ctx.translate(centerX, centerY);
-            const rotationRadians = (this.preferences.watermark_rotation || -30) * Math.PI / 180;
-            this.ctx.rotate(rotationRadians);
+            const positions = this.getWatermarkPositions(this.preferences.watermark_position);
 
-            const textWidth = this.ctx.measureText(watermarkText).width;
-            this.ctx.fillText(watermarkText, -textWidth / 2, 0);
-            this.ctx.fillText(watermarkText, -textWidth / 2, -this.canvas.height / 3);
-            this.ctx.fillText(watermarkText, -textWidth / 2, this.canvas.height / 3);
+            positions.forEach((point) => {
+                this.ctx.save();
+                this.ctx.translate(point.x, point.y);
+                if (rotationRadians) {
+                    this.ctx.rotate(rotationRadians);
+                }
+                this.ctx.fillText(watermarkText, 0, 0);
+                this.ctx.restore();
+            });
 
             this.ctx.restore();
         }

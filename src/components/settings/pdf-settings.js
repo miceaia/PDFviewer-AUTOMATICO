@@ -53,8 +53,48 @@
             .spv-pdf-settings-group:last-child {
                 border-bottom: none;
             }
+            .spv-pdf-settings-description {
+                margin: 0 0 12px;
+                color: #555d66;
+            }
+            .spv-pdf-color-control {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            }
+            .spv-pdf-color-control input[type="color"] {
+                width: 48px;
+                height: 34px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+            }
+            .spv-pdf-color-control input[type="text"] {
+                flex: 1;
+                font-family: SFMono-Regular, Consolas, monospace;
+                text-transform: uppercase;
+            }
+            .spv-pdf-settings-field input.invalid {
+                border-color: #d63638;
+                box-shadow: 0 0 0 1px rgba(214, 54, 56, 0.2);
+            }
         `;
         document.head.appendChild(styles);
+    }
+
+    function normalizeHex(value) {
+        if (!value) {
+            return '';
+        }
+        let hex = value.trim().replace(/^#+/, '');
+        if (hex.length === 3) {
+            hex = hex.split('').map(function (char) { return char + char; }).join('');
+        }
+        if (hex.length !== 6 || /[^0-9a-f]/i.test(hex)) {
+            return '';
+        }
+        return '#' + hex.toUpperCase();
     }
 
     function renderApp() {
@@ -82,6 +122,87 @@
         const themeColumns = document.createElement('div');
         themeColumns.className = 'spv-pdf-settings-columns';
 
+        function appendDescription(section, text) {
+            const description = document.createElement('p');
+            description.className = 'spv-pdf-settings-description';
+            description.textContent = text;
+            section.appendChild(description);
+        }
+
+        function createColorPickerField(options) {
+            const initialValue = normalizeHex(options.value) || '#FFFFFF';
+            const field = document.createElement('div');
+            field.className = 'spv-pdf-settings-field';
+            const label = document.createElement('label');
+            label.setAttribute('for', options.id);
+            label.textContent = options.labelText;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'spv-pdf-color-control';
+
+            const colorInput = document.createElement('input');
+            colorInput.type = 'color';
+            colorInput.id = options.id;
+            colorInput.name = options.name;
+            colorInput.value = initialValue;
+
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.id = options.id + '-text';
+            textInput.value = initialValue.toUpperCase();
+            textInput.placeholder = '#AABBCC';
+            textInput.autocomplete = 'off';
+            textInput.spellcheck = false;
+            textInput.setAttribute('aria-label', 'Código HEX para ' + options.labelText);
+            textInput.title = 'Ingresa un color en formato HEX (#RRGGBB).';
+            textInput.pattern = '^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$';
+            textInput.maxLength = 7;
+
+            wrapper.appendChild(colorInput);
+            wrapper.appendChild(textInput);
+
+            field.appendChild(label);
+            field.appendChild(wrapper);
+
+            if (options.hint) {
+                const hint = document.createElement('small');
+                hint.textContent = options.hint;
+                field.appendChild(hint);
+            }
+
+            colorInput.addEventListener('input', function () {
+                textInput.value = colorInput.value.toUpperCase();
+                textInput.classList.remove('invalid');
+            });
+
+            textInput.addEventListener('input', function () {
+                const normalized = normalizeHex(textInput.value);
+                if (normalized) {
+                    colorInput.value = normalized;
+                    textInput.classList.remove('invalid');
+                } else {
+                    textInput.classList.toggle('invalid', textInput.value.trim().length > 0);
+                }
+            });
+
+            textInput.addEventListener('blur', function () {
+                const normalized = normalizeHex(textInput.value) || colorInput.value;
+                textInput.value = normalized.toUpperCase();
+                colorInput.value = normalized;
+                textInput.classList.remove('invalid');
+            });
+
+            return { field: field, colorInput: colorInput, textInput: textInput };
+        }
+
+        function updateLinkedColorTextInput(id, value) {
+            const textInput = document.getElementById(id + '-text');
+            if (textInput) {
+                textInput.value = (value || '').toUpperCase();
+                textInput.classList.remove('invalid');
+            }
+        }
+
         const themeLabels = {
             base: 'Color base',
             base_dark: 'Color oscuro / hover',
@@ -96,21 +217,19 @@
 
         const themeInputs = {};
 
+        appendDescription(themeSection, 'Define los colores base del visor que verán los usuarios al abrir un PDF.');
+
         Object.keys(themeLabels).forEach(function (key) {
-            const field = document.createElement('div');
-            field.className = 'spv-pdf-settings-field';
-            const label = document.createElement('label');
-            label.setAttribute('for', 'spv-theme-' + key);
-            label.textContent = themeLabels[key];
-            const input = document.createElement('input');
-            input.type = 'color';
-            input.id = 'spv-theme-' + key;
-            input.name = 'theme_colors[' + key + ']';
-            input.value = (data.defaults.theme_colors && data.defaults.theme_colors[key]) || themeFallbacks[key];
-            field.appendChild(label);
-            field.appendChild(input);
-            themeColumns.appendChild(field);
-            themeInputs[key] = input;
+            const value = (data.defaults.theme_colors && data.defaults.theme_colors[key]) || themeFallbacks[key];
+            const colorField = createColorPickerField({
+                labelText: themeLabels[key],
+                id: 'spv-theme-' + key,
+                name: 'theme_colors[' + key + ']',
+                value: value,
+                hint: 'Puedes escribir el código HEX o elegirlo desde el selector.'
+            });
+            themeColumns.appendChild(colorField.field);
+            themeInputs[key] = colorField.colorInput;
         });
 
         themeSection.appendChild(themeColumns);
@@ -128,21 +247,19 @@
             pink: 'Color rosa'
         };
 
+        const highlightDefaults = data.defaults.highlight_colors || {};
+
+        appendDescription(highlightSection, 'Configura los colores de resaltado y protecciones que se aplicarán a las anotaciones.');
+
         Object.keys(colorLabels).forEach(function (key) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'spv-pdf-settings-field';
-            const label = document.createElement('label');
-            label.textContent = colorLabels[key];
-            label.setAttribute('for', 'spv-color-' + key);
-            const input = document.createElement('input');
-            input.type = 'color';
-            input.id = 'spv-color-' + key;
-            input.name = 'highlight_colors[' + key + ']';
-            input.value = data.defaults.highlight_colors[key] || '#ffffff';
-            input.dataset.colorKey = key;
-            wrapper.appendChild(label);
-            wrapper.appendChild(input);
-            highlightColumns.appendChild(wrapper);
+            const colorField = createColorPickerField({
+                labelText: colorLabels[key],
+                id: 'spv-color-' + key,
+                name: 'highlight_colors[' + key + ']',
+                value: highlightDefaults[key] || '#ffffff'
+            });
+            colorField.colorInput.dataset.colorKey = key;
+            highlightColumns.appendChild(colorField.field);
         });
 
         const opacityField = document.createElement('div');
@@ -187,6 +304,7 @@
         const watermarkSection = document.createElement('section');
         watermarkSection.className = 'spv-pdf-settings-group';
         watermarkSection.innerHTML = '<h3>Marca de agua</h3>';
+        appendDescription(watermarkSection, 'Personaliza el mensaje y estilo que se superpone en cada página.');
 
         const watermarkEnableField = document.createElement('div');
         watermarkEnableField.className = 'spv-pdf-settings-field';
@@ -221,18 +339,13 @@
         const watermarkColumns = document.createElement('div');
         watermarkColumns.className = 'spv-pdf-settings-columns';
 
-        const watermarkColorField = document.createElement('div');
-        watermarkColorField.className = 'spv-pdf-settings-field';
-        const watermarkColorLabel = document.createElement('label');
-        watermarkColorLabel.setAttribute('for', 'spv-watermark-color');
-        watermarkColorLabel.textContent = 'Color';
-        const watermarkColorInput = document.createElement('input');
-        watermarkColorInput.type = 'color';
-        watermarkColorInput.id = 'spv-watermark-color';
-        watermarkColorInput.name = 'watermark_color';
-        watermarkColorInput.value = data.defaults.watermark_color;
-        watermarkColorField.appendChild(watermarkColorLabel);
-        watermarkColorField.appendChild(watermarkColorInput);
+        const watermarkColorField = createColorPickerField({
+            labelText: 'Color',
+            id: 'spv-watermark-color',
+            name: 'watermark_color',
+            value: data.defaults.watermark_color,
+            hint: 'Utiliza un color suave para que no distraiga al lector.'
+        });
 
         const watermarkOpacityField = document.createElement('div');
         watermarkOpacityField.className = 'spv-pdf-settings-field';
@@ -280,7 +393,9 @@
         watermarkRotationField.appendChild(watermarkRotationLabel);
         watermarkRotationField.appendChild(watermarkRotationInput);
 
-        watermarkColumns.appendChild(watermarkColorField);
+        const watermarkColorInput = watermarkColorField.colorInput;
+
+        watermarkColumns.appendChild(watermarkColorField.field);
         watermarkColumns.appendChild(watermarkOpacityField);
         watermarkColumns.appendChild(watermarkFontField);
         watermarkColumns.appendChild(watermarkRotationField);
@@ -292,6 +407,7 @@
         const zoomSection = document.createElement('section');
         zoomSection.className = 'spv-pdf-settings-group';
         zoomSection.innerHTML = '<h3>Zoom predeterminado</h3>';
+        appendDescription(zoomSection, 'Define el nivel de zoom inicial y los límites que podrá usar el lector.');
         const zoomColumns = document.createElement('div');
         zoomColumns.className = 'spv-pdf-settings-columns';
 
@@ -353,10 +469,14 @@
         });
 
         function fillForm(values) {
+            const highlightColors = values.highlight_colors || {};
+
             Object.keys(colorLabels).forEach(function (key) {
                 const el = document.getElementById('spv-color-' + key);
                 if (el) {
-                    el.value = values.highlight_colors[key] || '#ffffff';
+                    const newValue = highlightColors[key] || '#ffffff';
+                    el.value = newValue;
+                    updateLinkedColorTextInput('spv-color-' + key, newValue);
                 }
             });
             Object.keys(themeInputs).forEach(function (key) {
@@ -364,12 +484,14 @@
                     || (data.defaults.theme_colors && data.defaults.theme_colors[key])
                     || themeFallbacks[key];
                 themeInputs[key].value = themeValue;
+                updateLinkedColorTextInput('spv-theme-' + key, themeValue);
             });
             opacityInput.value = values.highlight_opacity;
             copyCheckbox.checked = !!values.copy_protection;
             watermarkEnableInput.checked = !!values.watermark_enabled;
             watermarkTextarea.value = values.watermark_text;
             watermarkColorInput.value = values.watermark_color;
+            updateLinkedColorTextInput('spv-watermark-color', values.watermark_color);
             watermarkOpacityInput.value = values.watermark_opacity;
             watermarkFontInput.value = values.watermark_font_size;
             watermarkRotationInput.value = values.watermark_rotation;

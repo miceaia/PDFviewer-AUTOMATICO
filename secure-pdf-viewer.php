@@ -144,6 +144,11 @@ class SecurePDFViewer {
         wp_enqueue_style('spv-style');
         wp_enqueue_style('dashicons');
 
+        $theme_css = SPV_PDF_Settings::get_theme_css_variables();
+        if ($theme_css) {
+            wp_add_inline_style('spv-style', $theme_css);
+        }
+
         // Pasar datos AJAX al JavaScript
         wp_localize_script('spv-viewer', 'spvAjax', array(
             'ajax_url' => admin_url('admin-ajax.php'),

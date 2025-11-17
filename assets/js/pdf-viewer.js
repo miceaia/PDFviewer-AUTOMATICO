@@ -1,6 +1,26 @@
 (function($) {
     'use strict';
 
+    const DEFAULT_VIEWER_SETTINGS = {
+        default_zoom: 1.5,
+        min_zoom: 0.5,
+        max_zoom: 3.0,
+        highlight_opacity: 0.4,
+        highlight_colors: {
+            yellow: '#ffff00',
+            green: '#00ff00',
+            blue: '#00bfff',
+            pink: '#ff69b4'
+        },
+        watermark_enabled: 1,
+        watermark_text: 'Usuario: {user_name} · Fecha: {date}',
+        watermark_color: '#000000',
+        watermark_opacity: 0.15,
+        watermark_font_size: 14,
+        watermark_rotation: -30,
+        copy_protection: 1
+    };
+
     // Configurar PDF.js worker
     if (typeof pdfjsLib !== 'undefined') {
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
@@ -15,14 +35,18 @@
             this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
 
+            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, (window.spvViewerSettings && window.spvViewerSettings.defaults) || {});
+
             // PDF.js
             this.pdfDoc = null;
             this.currentPage = 1;
             this.totalPages = 0;
-            this.scale = 1.5;
+            this.scale = this.preferences.default_zoom;
             this.rendering = false;
-            this.maxScale = 3.0;
-            this.minScale = 0.5;
+            this.maxScale = this.preferences.max_zoom;
+            this.minScale = this.preferences.min_zoom;
+            this.highlightOpacity = this.preferences.highlight_opacity;
+            this.watermarkEnabled = !!this.preferences.watermark_enabled;
 
             // Usuario
             const userData = this.container.data('user-info') || {};
@@ -56,12 +80,24 @@
         }
 
         init() {
+            this.applyViewerPreferences();
             this.createLayers();
             this.bindEvents();
             this.bindKeyboardShortcuts();
             this.loadPDF();
             this.loadUserAnnotations();
-            this.preventCopyPaste();
+            if (this.preferences.copy_protection) {
+                this.preventCopyPaste();
+            }
+        }
+
+        applyViewerPreferences() {
+            this.scale = this.preferences.default_zoom;
+            this.maxScale = this.preferences.max_zoom;
+            this.minScale = this.preferences.min_zoom;
+            this.highlightOpacity = this.preferences.highlight_opacity;
+            this.watermarkEnabled = !!this.preferences.watermark_enabled;
+            this.updateZoomLabel();
         }
 
         createLayers() {
@@ -227,7 +263,7 @@
                 rect.setAttribute('width', quad.w);
                 rect.setAttribute('height', quad.h);
                 rect.setAttribute('fill', highlight.color);
-                rect.setAttribute('opacity', '0.4');
+                rect.setAttribute('opacity', String(this.highlightOpacity));
                 rect.setAttribute('data-highlight-id', highlight.id);
                 rect.classList.add('spv-highlight-rect');
 
@@ -243,25 +279,102 @@
             });
         }
 
-        addWatermarkToPage() {
-            const watermarkText = `Usuario: ${this.userName} · Fecha: ${new Date().toLocaleDateString()}`;
+        bindHighlightButtons() {
+            const buttons = [
+                { selector: '#hl-yellow', key: 'yellow' },
+                { selector: '#hl-green', key: 'green' },
+                { selector: '#hl-blue', key: 'blue' },
+                { selector: '#hl-pink', key: 'pink' }
+            ];
 
-            // Dibujar marca de agua en el canvas
+            buttons.forEach(btn => {
+                const button = $(btn.selector, this.container);
+                if (!button.length) {
+                    return;
+                }
+
+                const color = this.getHighlightColor(btn.key);
+                const textColor = this.getAccessibleTextColor(color);
+
+                button.css({
+                    background: color,
+                    color: textColor
+                });
+
+                button.off('click').on('click', () => this.selectHighlightColor(color, btn.key));
+            });
+        }
+
+        getHighlightColor(key) {
+            const palette = this.preferences.highlight_colors || {};
+            if (palette[key]) {
+                return palette[key];
+            }
+            return DEFAULT_VIEWER_SETTINGS.highlight_colors[key] || '#ffff00';
+        }
+
+        getAccessibleTextColor(color) {
+            if (typeof color !== 'string' || color.indexOf('#') !== 0) {
+                return '#333333';
+            }
+
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substring(0, 2), 16) || 0;
+            const g = parseInt(hex.substring(2, 4), 16) || 0;
+            const b = parseInt(hex.substring(4, 6), 16) || 0;
+            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            return luminance > 0.6 ? '#333333' : '#ffffff';
+        }
+
+        getWatermarkText() {
+            const template = this.preferences.watermark_text || '';
+            if (!template) {
+                return '';
+            }
+
+            const replacements = {
+                '{user_name}': this.userName,
+                '{user_email}': this.userEmail,
+                '{date}': new Date().toLocaleDateString(),
+                '{pdf_id}': this.pdfId
+            };
+
+            let text = template;
+
+            Object.keys(replacements).forEach(token => {
+                const value = replacements[token] || '';
+                text = text.replace(new RegExp(token, 'g'), value);
+            });
+
+            return text;
+        }
+
+        addWatermarkToPage() {
+            if (!this.watermarkEnabled) {
+                return;
+            }
+
+            const watermarkText = this.getWatermarkText();
+
+            if (!watermarkText) {
+                return;
+            }
+
             this.ctx.save();
-            this.ctx.globalAlpha = 0.15;
-            this.ctx.fillStyle = '#000000';
-            this.ctx.font = '14px Arial';
+            this.ctx.globalAlpha = this.preferences.watermark_opacity || 0.15;
+            this.ctx.fillStyle = this.preferences.watermark_color || '#000000';
+            const fontSize = this.preferences.watermark_font_size || 14;
+            this.ctx.font = `${fontSize}px Arial`;
 
             const centerX = this.canvas.width / 2;
             const centerY = this.canvas.height / 2;
 
             this.ctx.translate(centerX, centerY);
-            this.ctx.rotate(-30 * Math.PI / 180);
+            const rotationRadians = (this.preferences.watermark_rotation || -30) * Math.PI / 180;
+            this.ctx.rotate(rotationRadians);
 
             const textWidth = this.ctx.measureText(watermarkText).width;
             this.ctx.fillText(watermarkText, -textWidth / 2, 0);
-
-            // Repetir en esquinas
             this.ctx.fillText(watermarkText, -textWidth / 2, -this.canvas.height / 3);
             this.ctx.fillText(watermarkText, -textWidth / 2, this.canvas.height / 3);
 
@@ -279,11 +392,7 @@
             $('#btn-zoom-in', this.container).on('click', () => this.zoomIn());
             $('#btn-zoom-out', this.container).on('click', () => this.zoomOut());
 
-            // Colores de highlight
-            $('#hl-yellow', this.container).on('click', () => this.selectHighlightColor('#ffff00', 'yellow'));
-            $('#hl-green', this.container).on('click', () => this.selectHighlightColor('#00ff00', 'green'));
-            $('#hl-blue', this.container).on('click', () => this.selectHighlightColor('#00bfff', 'blue'));
-            $('#hl-pink', this.container).on('click', () => this.selectHighlightColor('#ff69b4', 'pink'));
+            this.bindHighlightButtons();
 
             // Borrador
             $('#hl-erase', this.container).on('click', () => this.toggleEraserMode());

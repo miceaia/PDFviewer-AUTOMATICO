@@ -64,11 +64,13 @@ $settings = cloudsync_get_settings();
     <p class="description">
         <?php esc_html_e( 'After saving credentials, use the respective OAuth consoles to grant access and paste the refresh tokens here.', 'secure-pdf-viewer' ); ?>
     </p>
+
+    <?php
+    /**
+     * Developers can hook into the settings page to render extra fields.
+     *
+     * @example add_action( 'cloudsync_settings_after_form', function() { echo '<p>Custom</p>'; } );
+     */
+    do_action( 'cloudsync_settings_after_form' );
+    ?>
 </div>
-<?php
-/**
- * Developers can hook into the settings page to render extra fields.
- *
- * @example add_action( 'cloudsync_settings_after_form', function() { echo '<p>Custom</p>'; } );
- */
-do_action( 'cloudsync_settings_after_form' );

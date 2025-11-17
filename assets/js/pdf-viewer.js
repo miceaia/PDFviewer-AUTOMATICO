@@ -42,7 +42,9 @@
             this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
 
-            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, (window.spvViewerSettings && window.spvViewerSettings.defaults) || {});
+            const perViewerSettings = this.container.data('viewer-settings') || this.container.data('viewerSettings') || {};
+            const globalSettings = (window.spvViewerSettings && window.spvViewerSettings.defaults) || {};
+            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, globalSettings, perViewerSettings);
 
             this.applyThemeColors();
 
@@ -352,7 +354,7 @@
                     return;
                 }
 
-                const color = this.getHighlightColor(btn.key);
+                const color = button.data('color') || this.getHighlightColor(btn.key);
                 const textColor = this.getAccessibleTextColor(color);
 
                 button.css({

@@ -52,6 +52,11 @@ class SPV_PDF_Settings {
                 'blue'   => '#00bfff',
                 'pink'   => '#ff69b4',
             ),
+            'theme_colors'      => array(
+                'base'          => '#1abc9c',
+                'base_dark'     => '#16a085',
+                'base_contrast' => '#ffffff',
+            ),
             'watermark_enabled'   => 1,
             'watermark_text'      => 'Usuario: {user_name} · Fecha: {date}',
             'watermark_color'     => '#000000',
@@ -124,6 +129,16 @@ class SPV_PDF_Settings {
             $sanitized_colors[ $slug ] = self::sanitize_color( $colors[ $slug ] ?? $default_color, $default_color );
         }
         $sanitized['highlight_colors'] = $sanitized_colors;
+
+        $theme_colors = isset( $input['theme_colors'] ) && is_array( $input['theme_colors'] )
+            ? $input['theme_colors']
+            : array();
+
+        $sanitized_theme = array();
+        foreach ( $defaults['theme_colors'] as $slug => $default_color ) {
+            $sanitized_theme[ $slug ] = self::sanitize_color( $theme_colors[ $slug ] ?? $default_color, $default_color );
+        }
+        $sanitized['theme_colors'] = $sanitized_theme;
 
         $sanitized['watermark_text']      = isset( $input['watermark_text'] ) ? sanitize_textarea_field( $input['watermark_text'] ) : $defaults['watermark_text'];
         $sanitized['watermark_enabled']   = empty( $input['watermark_enabled'] ) ? 0 : 1;
@@ -235,6 +250,10 @@ class SPV_PDF_Settings {
                 'type'              => 'object',
                 'required'          => false,
             ),
+            'theme_colors' => array(
+                'type'              => 'object',
+                'required'          => false,
+            ),
             'watermark_enabled' => array(
                 'type'              => 'boolean',
                 'required'          => false,
@@ -333,6 +352,7 @@ class SPV_PDF_Settings {
             'max_zoom'          => (float) $settings['max_zoom'],
             'highlight_opacity' => (float) $settings['highlight_opacity'],
             'highlight_colors'  => $settings['highlight_colors'],
+            'theme_colors'      => $settings['theme_colors'],
             'watermark_enabled' => (int) $settings['watermark_enabled'],
             'watermark_text'    => $settings['watermark_text'],
             'watermark_color'   => $settings['watermark_color'],
@@ -340,6 +360,69 @@ class SPV_PDF_Settings {
             'watermark_font_size'=> (float) $settings['watermark_font_size'],
             'watermark_rotation'=> (float) $settings['watermark_rotation'],
             'copy_protection'   => (int) $settings['copy_protection'],
+        );
+    }
+
+    /**
+     * Generates CSS custom properties for the theme colors.
+     *
+     * @return string
+     */
+    public static function get_theme_css_variables() {
+        $settings = self::get_settings();
+        $colors   = isset( $settings['theme_colors'] ) && is_array( $settings['theme_colors'] ) ? $settings['theme_colors'] : array();
+
+        if ( empty( $colors ) ) {
+            return '';
+        }
+
+        $declarations = array();
+
+        foreach ( $colors as $key => $color ) {
+            if ( empty( $color ) || ! is_string( $color ) ) {
+                continue;
+            }
+
+            $var_name       = '--spv-theme-' . str_replace( '_', '-', sanitize_key( $key ) );
+            $declarations[] = sprintf( '%s: %s;', $var_name, esc_html( $color ) );
+        }
+
+        if ( ! empty( $colors['base'] ) ) {
+            $rgb = self::hex_to_rgb( $colors['base'] );
+            if ( $rgb ) {
+                $declarations[] = sprintf( '--spv-theme-base-rgb: %d, %d, %d;', $rgb[0], $rgb[1], $rgb[2] );
+            }
+        }
+
+        if ( empty( $declarations ) ) {
+            return '';
+        }
+
+        return ':root {' . implode( ' ', $declarations ) . '}';
+    }
+
+    /**
+     * Converts a HEX string into an RGB triplet.
+     *
+     * @param string $hex Color in hexadecimal.
+     *
+     * @return array|null
+     */
+    protected static function hex_to_rgb( $hex ) {
+        $hex = ltrim( $hex, '#' );
+
+        if ( 3 === strlen( $hex ) ) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+
+        if ( 6 !== strlen( $hex ) ) {
+            return null;
+        }
+
+        return array(
+            hexdec( substr( $hex, 0, 2 ) ),
+            hexdec( substr( $hex, 2, 2 ) ),
+            hexdec( substr( $hex, 4, 2 ) ),
         );
     }
 }

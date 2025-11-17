@@ -76,6 +76,45 @@
         const message = document.createElement('div');
         message.className = 'spv-pdf-settings-message';
 
+        const themeSection = document.createElement('section');
+        themeSection.className = 'spv-pdf-settings-group';
+        themeSection.innerHTML = '<h3>Tema del visor</h3>';
+        const themeColumns = document.createElement('div');
+        themeColumns.className = 'spv-pdf-settings-columns';
+
+        const themeLabels = {
+            base: 'Color base',
+            base_dark: 'Color oscuro / hover',
+            base_contrast: 'Color de texto sobre el tema'
+        };
+
+        const themeFallbacks = {
+            base: '#1abc9c',
+            base_dark: '#16a085',
+            base_contrast: '#ffffff'
+        };
+
+        const themeInputs = {};
+
+        Object.keys(themeLabels).forEach(function (key) {
+            const field = document.createElement('div');
+            field.className = 'spv-pdf-settings-field';
+            const label = document.createElement('label');
+            label.setAttribute('for', 'spv-theme-' + key);
+            label.textContent = themeLabels[key];
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.id = 'spv-theme-' + key;
+            input.name = 'theme_colors[' + key + ']';
+            input.value = (data.defaults.theme_colors && data.defaults.theme_colors[key]) || themeFallbacks[key];
+            field.appendChild(label);
+            field.appendChild(input);
+            themeColumns.appendChild(field);
+            themeInputs[key] = input;
+        });
+
+        themeSection.appendChild(themeColumns);
+
         const highlightSection = document.createElement('section');
         highlightSection.className = 'spv-pdf-settings-group';
         highlightSection.innerHTML = '<h3>Colores y anotaciones</h3>';
@@ -299,6 +338,7 @@
             showMessage('Valores restablecidos a los predeterminados. No olvides guardar.', 'notice-warning');
         });
 
+        form.appendChild(themeSection);
         form.appendChild(highlightSection);
         form.appendChild(watermarkSection);
         form.appendChild(zoomSection);
@@ -318,6 +358,12 @@
                 if (el) {
                     el.value = values.highlight_colors[key] || '#ffffff';
                 }
+            });
+            Object.keys(themeInputs).forEach(function (key) {
+                const themeValue = (values.theme_colors && values.theme_colors[key])
+                    || (data.defaults.theme_colors && data.defaults.theme_colors[key])
+                    || themeFallbacks[key];
+                themeInputs[key].value = themeValue;
             });
             opacityInput.value = values.highlight_opacity;
             copyCheckbox.checked = !!values.copy_protection;
@@ -385,6 +431,7 @@
         function collectPayload() {
             const payload = {
                 highlight_colors: {},
+                theme_colors: {},
                 highlight_opacity: parseFloat(opacityInput.value) || 0.4,
                 copy_protection: copyCheckbox.checked ? 1 : 0,
                 watermark_enabled: watermarkEnableInput.checked ? 1 : 0,
@@ -402,6 +449,12 @@
                 const el = document.getElementById('spv-color-' + key);
                 if (el) {
                     payload.highlight_colors[key] = el.value;
+                }
+            });
+
+            Object.keys(themeInputs).forEach(function (key) {
+                if (themeInputs[key]) {
+                    payload.theme_colors[key] = themeInputs[key].value;
                 }
             });
 

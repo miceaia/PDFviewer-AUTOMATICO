@@ -12,6 +12,11 @@
             blue: '#00bfff',
             pink: '#ff69b4'
         },
+        theme_colors: {
+            base: '#1abc9c',
+            base_dark: '#16a085',
+            base_contrast: '#ffffff'
+        },
         watermark_enabled: 1,
         watermark_text: 'Usuario: {user_name} · Fecha: {date}',
         watermark_color: '#000000',
@@ -36,6 +41,8 @@
             this.canvasContainer = this.container.find('.spv-canvas-container');
 
             this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, (window.spvViewerSettings && window.spvViewerSettings.defaults) || {});
+
+            this.applyThemeColors();
 
             // PDF.js
             this.pdfDoc = null;
@@ -98,6 +105,52 @@
             this.highlightOpacity = this.preferences.highlight_opacity;
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
             this.updateZoomLabel();
+        }
+
+        applyThemeColors() {
+            const colors = this.preferences.theme_colors || {};
+            const root = document.documentElement;
+
+            Object.keys(colors).forEach((key) => {
+                const value = colors[key];
+                if (!value) {
+                    return;
+                }
+                const varName = `--spv-theme-${key.replace(/_/g, '-')}`;
+                root.style.setProperty(varName, value);
+            });
+
+            if (colors.base) {
+                const rgb = this.hexToRgb(colors.base);
+                if (rgb) {
+                    root.style.setProperty('--spv-theme-base-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+                }
+            }
+        }
+
+        hexToRgb(hex) {
+            if (typeof hex !== 'string') {
+                return null;
+            }
+
+            let sanitized = hex.replace('#', '');
+            if (sanitized.length === 3) {
+                sanitized = sanitized.split('').map(char => char + char).join('');
+            }
+
+            if (sanitized.length !== 6) {
+                return null;
+            }
+
+            const r = parseInt(sanitized.substring(0, 2), 16);
+            const g = parseInt(sanitized.substring(2, 4), 16);
+            const b = parseInt(sanitized.substring(4, 6), 16);
+
+            if ([r, g, b].some(value => Number.isNaN(value))) {
+                return null;
+            }
+
+            return { r, g, b };
         }
 
         createLayers() {

@@ -329,7 +329,7 @@
         watermarkTextarea.style.width = '100%';
         watermarkTextarea.value = data.defaults.watermark_text;
         const watermarkHint = document.createElement('small');
-        watermarkHint.textContent = 'Variables disponibles: {user_name}, {user_email}, {pdf_id}, {date}.';
+        watermarkHint.textContent = 'Variables disponibles: {{username}}, {{email}}, {{pdfId}}, {{date}}.';
         watermarkTextField.appendChild(watermarkTextLabel);
         watermarkTextField.appendChild(watermarkTextarea);
         watermarkTextField.appendChild(watermarkHint);
@@ -361,8 +361,8 @@
         watermarkOpacityField.appendChild(watermarkOpacityLabel);
         watermarkOpacityField.appendChild(watermarkOpacityInput);
 
-        const watermarkFontField = document.createElement('div');
-        watermarkFontField.className = 'spv-pdf-settings-field';
+        const watermarkFontSizeField = document.createElement('div');
+        watermarkFontSizeField.className = 'spv-pdf-settings-field';
         const watermarkFontLabel = document.createElement('label');
         watermarkFontLabel.setAttribute('for', 'spv-watermark-font');
         watermarkFontLabel.textContent = 'Tamaño de fuente (px)';
@@ -373,8 +373,36 @@
         watermarkFontInput.id = 'spv-watermark-font';
         watermarkFontInput.name = 'watermark_font_size';
         watermarkFontInput.value = data.defaults.watermark_font_size;
-        watermarkFontField.appendChild(watermarkFontLabel);
-        watermarkFontField.appendChild(watermarkFontInput);
+        watermarkFontSizeField.appendChild(watermarkFontLabel);
+        watermarkFontSizeField.appendChild(watermarkFontInput);
+
+        const watermarkFontFamilyField = document.createElement('div');
+        watermarkFontFamilyField.className = 'spv-pdf-settings-field';
+        const watermarkFontFamilyLabel = document.createElement('label');
+        watermarkFontFamilyLabel.setAttribute('for', 'spv-watermark-font-family');
+        watermarkFontFamilyLabel.textContent = 'Fuente';
+        const watermarkFontFamilySelect = document.createElement('select');
+        watermarkFontFamilySelect.id = 'spv-watermark-font-family';
+        watermarkFontFamilySelect.name = 'watermark_font_family';
+        const fontOptions = [
+            'Arial',
+            'Helvetica',
+            'Times New Roman',
+            'Courier New',
+            'Georgia',
+            'Verdana',
+            'Roboto',
+            'Monospace'
+        ];
+        fontOptions.forEach(function (font) {
+            const option = document.createElement('option');
+            option.value = font;
+            option.textContent = font;
+            watermarkFontFamilySelect.appendChild(option);
+        });
+        watermarkFontFamilySelect.value = data.defaults.watermark_font_family || 'Arial';
+        watermarkFontFamilyField.appendChild(watermarkFontFamilyLabel);
+        watermarkFontFamilyField.appendChild(watermarkFontFamilySelect);
 
         const watermarkRotationField = document.createElement('div');
         watermarkRotationField.className = 'spv-pdf-settings-field';
@@ -395,12 +423,31 @@
 
         watermarkColumns.appendChild(watermarkColorField.field);
         watermarkColumns.appendChild(watermarkOpacityField);
-        watermarkColumns.appendChild(watermarkFontField);
+        watermarkColumns.appendChild(watermarkFontSizeField);
         watermarkColumns.appendChild(watermarkRotationField);
+        watermarkColumns.appendChild(watermarkFontFamilyField);
+        watermarkColumns.appendChild(watermarkPositionField);
 
         watermarkSection.appendChild(watermarkEnableField);
         watermarkSection.appendChild(watermarkTextField);
         watermarkSection.appendChild(watermarkColumns);
+
+        const watermarkPreviewField = document.createElement('div');
+        watermarkPreviewField.className = 'spv-pdf-settings-field spv-watermark-preview-field';
+        const watermarkPreviewLabel = document.createElement('label');
+        watermarkPreviewLabel.textContent = 'Vista previa';
+        watermarkPreviewLabel.setAttribute('for', 'spv-watermark-preview');
+        const watermarkPreviewCanvas = document.createElement('canvas');
+        watermarkPreviewCanvas.id = 'spv-watermark-preview';
+        watermarkPreviewCanvas.width = 360;
+        watermarkPreviewCanvas.height = 220;
+        const watermarkPreviewHint = document.createElement('small');
+        watermarkPreviewHint.textContent = 'Se muestran datos de ejemplo para validar texto, color y posición.';
+        watermarkPreviewField.appendChild(watermarkPreviewLabel);
+        watermarkPreviewField.appendChild(watermarkPreviewCanvas);
+        watermarkPreviewField.appendChild(watermarkPreviewHint);
+
+        watermarkSection.appendChild(watermarkPreviewField);
 
         const zoomSection = document.createElement('section');
         zoomSection.className = 'spv-pdf-settings-group';
@@ -466,6 +513,156 @@
             saveSettings();
         });
 
+        const watermarkPreviewCtx = watermarkPreviewCanvas.getContext('2d');
+        const previewSampleData = {
+            username: 'Laura Gómez',
+            email: 'laura@example.com',
+            pdfid: 'demo-42',
+            userid: '42'
+        };
+
+        function interpolatePreviewWatermark(template) {
+            if (!template) {
+                return '';
+            }
+
+            const now = new Date();
+            const replacements = {
+                username: previewSampleData.username,
+                user_name: previewSampleData.username,
+                name: previewSampleData.username,
+                email: previewSampleData.email,
+                user_email: previewSampleData.email,
+                pdfid: previewSampleData.pdfid,
+                pdf_id: previewSampleData.pdfid,
+                userid: previewSampleData.userid,
+                user_id: previewSampleData.userid,
+                date: now.toLocaleDateString(),
+                datetime: now.toLocaleString()
+            };
+
+            return template.replace(/\{\{\s*([^}]+)\s*\}\}|\{([^}]+)\}/g, function (match, doubleToken, singleToken) {
+                const rawToken = (doubleToken || singleToken || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+                if (!rawToken) {
+                    return '';
+                }
+                return Object.prototype.hasOwnProperty.call(replacements, rawToken)
+                    ? replacements[rawToken]
+                    : '';
+            });
+        }
+
+        function getPreviewPositions(position) {
+            const width = watermarkPreviewCanvas.width;
+            const height = watermarkPreviewCanvas.height;
+            const base = {
+                center: [ { x: width / 2, y: height / 2 } ],
+                top_left: [ { x: width * 0.2, y: height * 0.2 } ],
+                top_right: [ { x: width * 0.8, y: height * 0.2 } ],
+                bottom_left: [ { x: width * 0.2, y: height * 0.8 } ],
+                bottom_right: [ { x: width * 0.8, y: height * 0.8 } ],
+                tile: [
+                    { x: width / 2, y: height / 2 },
+                    { x: width * 0.2, y: height * 0.2 },
+                    { x: width * 0.8, y: height * 0.2 },
+                    { x: width * 0.2, y: height * 0.8 },
+                    { x: width * 0.8, y: height * 0.8 }
+                ]
+            };
+
+            if (!position || !base[position]) {
+                return base.center;
+            }
+
+            return base[position];
+        }
+
+        function renderWatermarkPreview() {
+            if (!watermarkPreviewCtx) {
+                return;
+            }
+
+            const width = watermarkPreviewCanvas.width;
+            const height = watermarkPreviewCanvas.height;
+
+            watermarkPreviewCtx.clearRect(0, 0, width, height);
+            watermarkPreviewCtx.save();
+            watermarkPreviewCtx.fillStyle = '#ffffff';
+            watermarkPreviewCtx.fillRect(0, 0, width, height);
+            watermarkPreviewCtx.strokeStyle = '#ccd0d4';
+            watermarkPreviewCtx.strokeRect(0.5, 0.5, width - 1, height - 1);
+
+            if (!watermarkEnableInput.checked) {
+                watermarkPreviewCtx.fillStyle = '#7b8a8b';
+                watermarkPreviewCtx.font = '14px sans-serif';
+                watermarkPreviewCtx.textAlign = 'center';
+                watermarkPreviewCtx.textBaseline = 'middle';
+                watermarkPreviewCtx.fillText('La marca de agua está desactivada.', width / 2, height / 2);
+                watermarkPreviewCtx.restore();
+                return;
+            }
+
+            const previewText = interpolatePreviewWatermark(watermarkTextarea.value);
+            if (!previewText) {
+                watermarkPreviewCtx.fillStyle = '#7b8a8b';
+                watermarkPreviewCtx.font = '14px sans-serif';
+                watermarkPreviewCtx.textAlign = 'center';
+                watermarkPreviewCtx.textBaseline = 'middle';
+                watermarkPreviewCtx.fillText('Añade un texto para ver la vista previa.', width / 2, height / 2);
+                watermarkPreviewCtx.restore();
+                return;
+            }
+
+            const fontSize = parseFloat(watermarkFontInput.value) || 14;
+            const fontFamily = watermarkFontFamilySelect.value || 'Arial';
+            const opacityValue = parseFloat(watermarkOpacityInput.value);
+            let opacity = Number.isFinite(opacityValue) ? opacityValue : 0.15;
+            if (opacity < 0) {
+                opacity = 0;
+            } else if (opacity > 1) {
+                opacity = 1;
+            }
+            const color = watermarkColorInput.value || '#000000';
+            const rotationValue = parseFloat(watermarkRotationInput.value) || 0;
+            const positions = getPreviewPositions(watermarkPositionSelect.value);
+
+            positions.forEach(function (point) {
+                watermarkPreviewCtx.save();
+                watermarkPreviewCtx.globalAlpha = opacity;
+                watermarkPreviewCtx.fillStyle = color;
+                watermarkPreviewCtx.font = `${fontSize}px ${fontFamily}`;
+                watermarkPreviewCtx.textAlign = 'center';
+                watermarkPreviewCtx.textBaseline = 'middle';
+                watermarkPreviewCtx.translate(point.x, point.y);
+                if (rotationValue) {
+                    watermarkPreviewCtx.rotate((rotationValue * Math.PI) / 180);
+                }
+                watermarkPreviewCtx.fillText(previewText, 0, 0);
+                watermarkPreviewCtx.restore();
+            });
+
+            watermarkPreviewCtx.restore();
+        }
+
+        function bindPreviewListener(element) {
+            if (!element) {
+                return;
+            }
+            element.addEventListener('input', renderWatermarkPreview);
+            element.addEventListener('change', renderWatermarkPreview);
+        }
+
+        [
+            watermarkEnableInput,
+            watermarkTextarea,
+            watermarkColorInput,
+            watermarkOpacityInput,
+            watermarkFontInput,
+            watermarkRotationInput,
+            watermarkFontFamilySelect,
+            watermarkPositionSelect
+        ].forEach(bindPreviewListener);
+
         function fillForm(values) {
             Object.keys(colorLabels).forEach(function (key) {
                 const el = document.getElementById('spv-color-' + key);
@@ -491,9 +688,24 @@
             watermarkOpacityInput.value = values.watermark_opacity;
             watermarkFontInput.value = values.watermark_font_size;
             watermarkRotationInput.value = values.watermark_rotation;
+            watermarkFontFamilySelect.value = values.watermark_font_family || 'Arial';
+            if (!watermarkFontFamilySelect.value) {
+                watermarkFontFamilySelect.value = 'Arial';
+            }
+            if (watermarkFontFamilySelect.selectedIndex === -1) {
+                watermarkFontFamilySelect.value = 'Arial';
+            }
+            watermarkPositionSelect.value = values.watermark_position || 'center';
+            if (!watermarkPositionSelect.value) {
+                watermarkPositionSelect.value = 'center';
+            }
+            if (watermarkPositionSelect.selectedIndex === -1) {
+                watermarkPositionSelect.value = 'center';
+            }
             document.getElementById('spv-zoom-default').value = values.default_zoom;
             document.getElementById('spv-zoom-min').value = values.min_zoom;
             document.getElementById('spv-zoom-max').value = values.max_zoom;
+            renderWatermarkPreview();
         }
 
         function showMessage(text, type) {
@@ -557,7 +769,9 @@
                 watermark_color: watermarkColorInput.value,
                 watermark_opacity: parseFloat(watermarkOpacityInput.value) || 0.15,
                 watermark_font_size: parseFloat(watermarkFontInput.value) || 14,
+                watermark_font_family: watermarkFontFamilySelect.value || 'Arial',
                 watermark_rotation: parseFloat(watermarkRotationInput.value) || -30,
+                watermark_position: watermarkPositionSelect.value || 'center',
                 default_zoom: parseFloat(document.getElementById('spv-zoom-default').value) || 1.5,
                 min_zoom: parseFloat(document.getElementById('spv-zoom-min').value) || 0.5,
                 max_zoom: parseFloat(document.getElementById('spv-zoom-max').value) || 3

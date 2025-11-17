@@ -2,6 +2,17 @@
     'use strict';
 
     const data = window.spvPdfSettings || null;
+    const WATERMARK_TOKENS = [
+        { token: '{user_name}', label: '{user_name}', description: 'Nombre visible del usuario' },
+        { token: '{user_email}', label: '{user_email}', description: 'Correo electrónico del usuario' },
+        { token: '{user_id}', label: '{user_id}', description: 'ID numérico del usuario' },
+        { token: '{user_role}', label: '{user_role}', description: 'Rol principal del usuario' },
+        { token: '{user_login}', label: '{user_login}', description: 'Nombre de acceso del usuario' },
+        { token: '{pdf_id}', label: '{pdf_id}', description: 'Identificador del PDF' },
+        { token: '{date}', label: '{date}', description: 'Fecha actual (según navegador del lector)' },
+        { token: '{site_name}', label: '{site_name}', description: 'Nombre del sitio' },
+        { token: '{site_url}', label: '{site_url}', description: 'URL del sitio' }
+    ];
 
     function createStyles() {
         if (document.getElementById('spv-pdf-settings-styles')) {
@@ -53,8 +64,76 @@
             .spv-pdf-settings-group:last-child {
                 border-bottom: none;
             }
+            .spv-pdf-settings-description {
+                margin: 0 0 12px;
+                color: #555d66;
+            }
+            .spv-pdf-color-control {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            }
+            .spv-pdf-color-control input[type="color"] {
+                width: 48px;
+                height: 34px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                cursor: pointer;
+            }
+            .spv-pdf-color-control input[type="text"] {
+                flex: 1;
+                font-family: SFMono-Regular, Consolas, monospace;
+                text-transform: uppercase;
+            }
+            .spv-pdf-settings-field input.invalid {
+                border-color: #d63638;
+                box-shadow: 0 0 0 1px rgba(214, 54, 56, 0.2);
+            }
+            .spv-token-buttons {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                align-items: center;
+                margin-top: 8px;
+            }
+            .spv-token-buttons__label {
+                font-size: 12px;
+                font-weight: 600;
+                color: #555d66;
+                margin-right: 8px;
+            }
+            .spv-token-buttons button {
+                border-radius: 999px;
+                border: 1px solid #c3c4c7;
+                padding: 2px 10px;
+                background: #fff;
+                cursor: pointer;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .spv-token-buttons button:hover,
+            .spv-token-buttons button:focus {
+                border-color: #2271b1;
+                color: #2271b1;
+                outline: none;
+            }
         `;
         document.head.appendChild(styles);
+    }
+
+    function normalizeHex(value) {
+        if (!value) {
+            return '';
+        }
+        let hex = value.trim().replace(/^#+/, '');
+        if (hex.length === 3) {
+            hex = hex.split('').map(function (char) { return char + char; }).join('');
+        }
+        if (hex.length !== 6 || /[^0-9a-f]/i.test(hex)) {
+            return '';
+        }
+        return '#' + hex.toUpperCase();
     }
 
     function renderApp() {
@@ -82,6 +161,108 @@
         const themeColumns = document.createElement('div');
         themeColumns.className = 'spv-pdf-settings-columns';
 
+        function appendDescription(section, text) {
+            const description = document.createElement('p');
+            description.className = 'spv-pdf-settings-description';
+            description.textContent = text;
+            section.appendChild(description);
+        }
+
+        function createColorPickerField(options) {
+            const initialValue = normalizeHex(options.value) || '#FFFFFF';
+            const field = document.createElement('div');
+            field.className = 'spv-pdf-settings-field';
+            const label = document.createElement('label');
+            label.setAttribute('for', options.id);
+            label.textContent = options.labelText;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'spv-pdf-color-control';
+
+            const colorInput = document.createElement('input');
+            colorInput.type = 'color';
+            colorInput.id = options.id;
+            colorInput.name = options.name;
+            colorInput.value = initialValue;
+
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.id = options.id + '-text';
+            textInput.value = initialValue.toUpperCase();
+            textInput.placeholder = '#AABBCC';
+            textInput.autocomplete = 'off';
+            textInput.spellcheck = false;
+            textInput.setAttribute('aria-label', 'Código HEX para ' + options.labelText);
+            textInput.title = 'Ingresa un color en formato HEX (#RRGGBB).';
+            textInput.pattern = '^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$';
+            textInput.maxLength = 7;
+
+            wrapper.appendChild(colorInput);
+            wrapper.appendChild(textInput);
+
+            field.appendChild(label);
+            field.appendChild(wrapper);
+
+            if (options.hint) {
+                const hint = document.createElement('small');
+                hint.textContent = options.hint;
+                field.appendChild(hint);
+            }
+
+            colorInput.addEventListener('input', function () {
+                textInput.value = colorInput.value.toUpperCase();
+                textInput.classList.remove('invalid');
+            });
+
+            textInput.addEventListener('input', function () {
+                const normalized = normalizeHex(textInput.value);
+                if (normalized) {
+                    colorInput.value = normalized;
+                    textInput.classList.remove('invalid');
+                } else {
+                    textInput.classList.toggle('invalid', textInput.value.trim().length > 0);
+                }
+            });
+
+            textInput.addEventListener('blur', function () {
+                const normalized = normalizeHex(textInput.value) || colorInput.value;
+                textInput.value = normalized.toUpperCase();
+                colorInput.value = normalized;
+                textInput.classList.remove('invalid');
+            });
+
+            return { field: field, colorInput: colorInput, textInput: textInput };
+        }
+
+        function insertTokenAtCursor(textarea, token) {
+            if (!textarea) {
+                return;
+            }
+
+            const start = textarea.selectionStart || 0;
+            const end = textarea.selectionEnd || 0;
+            const value = textarea.value || '';
+            const newValue = value.slice(0, start) + token + value.slice(end);
+            textarea.value = newValue;
+
+            const newCursor = start + token.length;
+            textarea.focus();
+            if (typeof textarea.setSelectionRange === 'function') {
+                textarea.setSelectionRange(newCursor, newCursor);
+            }
+
+            const event = new Event('input', { bubbles: true });
+            textarea.dispatchEvent(event);
+        }
+
+        function updateLinkedColorTextInput(id, value) {
+            const textInput = document.getElementById(id + '-text');
+            if (textInput) {
+                textInput.value = (value || '').toUpperCase();
+                textInput.classList.remove('invalid');
+            }
+        }
+
         const themeLabels = {
             base: 'Color base',
             base_dark: 'Color oscuro / hover',
@@ -96,21 +277,19 @@
 
         const themeInputs = {};
 
+        appendDescription(themeSection, 'Define los colores base del visor que verán los usuarios al abrir un PDF.');
+
         Object.keys(themeLabels).forEach(function (key) {
-            const field = document.createElement('div');
-            field.className = 'spv-pdf-settings-field';
-            const label = document.createElement('label');
-            label.setAttribute('for', 'spv-theme-' + key);
-            label.textContent = themeLabels[key];
-            const input = document.createElement('input');
-            input.type = 'color';
-            input.id = 'spv-theme-' + key;
-            input.name = 'theme_colors[' + key + ']';
-            input.value = (data.defaults.theme_colors && data.defaults.theme_colors[key]) || themeFallbacks[key];
-            field.appendChild(label);
-            field.appendChild(input);
-            themeColumns.appendChild(field);
-            themeInputs[key] = input;
+            const value = (data.defaults.theme_colors && data.defaults.theme_colors[key]) || themeFallbacks[key];
+            const colorField = createColorPickerField({
+                labelText: themeLabels[key],
+                id: 'spv-theme-' + key,
+                name: 'theme_colors[' + key + ']',
+                value: value,
+                hint: 'Puedes escribir el código HEX o elegirlo desde el selector.'
+            });
+            themeColumns.appendChild(colorField.field);
+            themeInputs[key] = colorField.colorInput;
         });
 
         themeSection.appendChild(themeColumns);
@@ -128,21 +307,19 @@
             pink: 'Color rosa'
         };
 
+        const highlightDefaults = data.defaults.highlight_colors || {};
+
+        appendDescription(highlightSection, 'Configura los colores de resaltado y protecciones que se aplicarán a las anotaciones.');
+
         Object.keys(colorLabels).forEach(function (key) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'spv-pdf-settings-field';
-            const label = document.createElement('label');
-            label.textContent = colorLabels[key];
-            label.setAttribute('for', 'spv-color-' + key);
-            const input = document.createElement('input');
-            input.type = 'color';
-            input.id = 'spv-color-' + key;
-            input.name = 'highlight_colors[' + key + ']';
-            input.value = data.defaults.highlight_colors[key] || '#ffffff';
-            input.dataset.colorKey = key;
-            wrapper.appendChild(label);
-            wrapper.appendChild(input);
-            highlightColumns.appendChild(wrapper);
+            const colorField = createColorPickerField({
+                labelText: colorLabels[key],
+                id: 'spv-color-' + key,
+                name: 'highlight_colors[' + key + ']',
+                value: highlightDefaults[key] || '#ffffff'
+            });
+            colorField.colorInput.dataset.colorKey = key;
+            highlightColumns.appendChild(colorField.field);
         });
 
         const opacityField = document.createElement('div');
@@ -187,6 +364,7 @@
         const watermarkSection = document.createElement('section');
         watermarkSection.className = 'spv-pdf-settings-group';
         watermarkSection.innerHTML = '<h3>Marca de agua</h3>';
+        appendDescription(watermarkSection, 'Personaliza el mensaje y estilo que se superpone en cada página.');
 
         const watermarkEnableField = document.createElement('div');
         watermarkEnableField.className = 'spv-pdf-settings-field';
@@ -213,26 +391,41 @@
         watermarkTextarea.style.width = '100%';
         watermarkTextarea.value = data.defaults.watermark_text;
         const watermarkHint = document.createElement('small');
-        watermarkHint.textContent = 'Variables disponibles: {user_name}, {user_email}, {pdf_id}, {date}.';
+        watermarkHint.textContent = 'Variables disponibles: {user_name}, {user_email}, {user_id}, {user_role}, {user_login}, {pdf_id}, {site_name}, {site_url}, {date}.';
         watermarkTextField.appendChild(watermarkTextLabel);
         watermarkTextField.appendChild(watermarkTextarea);
         watermarkTextField.appendChild(watermarkHint);
 
+        const watermarkTokensWrapper = document.createElement('div');
+        watermarkTokensWrapper.className = 'spv-token-buttons';
+        const watermarkTokensLabel = document.createElement('span');
+        watermarkTokensLabel.className = 'spv-token-buttons__label';
+        watermarkTokensLabel.textContent = 'Insertar variable:';
+        watermarkTokensWrapper.appendChild(watermarkTokensLabel);
+
+        WATERMARK_TOKENS.forEach(function (token) {
+            const tokenButton = document.createElement('button');
+            tokenButton.type = 'button';
+            tokenButton.textContent = token.label;
+            tokenButton.title = token.description;
+            tokenButton.addEventListener('click', function () {
+                insertTokenAtCursor(watermarkTextarea, token.token);
+            });
+            watermarkTokensWrapper.appendChild(tokenButton);
+        });
+
+        watermarkTextField.appendChild(watermarkTokensWrapper);
+
         const watermarkColumns = document.createElement('div');
         watermarkColumns.className = 'spv-pdf-settings-columns';
 
-        const watermarkColorField = document.createElement('div');
-        watermarkColorField.className = 'spv-pdf-settings-field';
-        const watermarkColorLabel = document.createElement('label');
-        watermarkColorLabel.setAttribute('for', 'spv-watermark-color');
-        watermarkColorLabel.textContent = 'Color';
-        const watermarkColorInput = document.createElement('input');
-        watermarkColorInput.type = 'color';
-        watermarkColorInput.id = 'spv-watermark-color';
-        watermarkColorInput.name = 'watermark_color';
-        watermarkColorInput.value = data.defaults.watermark_color;
-        watermarkColorField.appendChild(watermarkColorLabel);
-        watermarkColorField.appendChild(watermarkColorInput);
+        const watermarkColorField = createColorPickerField({
+            labelText: 'Color',
+            id: 'spv-watermark-color',
+            name: 'watermark_color',
+            value: data.defaults.watermark_color,
+            hint: 'Utiliza un color suave para que no distraiga al lector.'
+        });
 
         const watermarkOpacityField = document.createElement('div');
         watermarkOpacityField.className = 'spv-pdf-settings-field';
@@ -280,7 +473,9 @@
         watermarkRotationField.appendChild(watermarkRotationLabel);
         watermarkRotationField.appendChild(watermarkRotationInput);
 
-        watermarkColumns.appendChild(watermarkColorField);
+        const watermarkColorInput = watermarkColorField.colorInput;
+
+        watermarkColumns.appendChild(watermarkColorField.field);
         watermarkColumns.appendChild(watermarkOpacityField);
         watermarkColumns.appendChild(watermarkFontField);
         watermarkColumns.appendChild(watermarkRotationField);
@@ -292,6 +487,7 @@
         const zoomSection = document.createElement('section');
         zoomSection.className = 'spv-pdf-settings-group';
         zoomSection.innerHTML = '<h3>Zoom predeterminado</h3>';
+        appendDescription(zoomSection, 'Define el nivel de zoom inicial y los límites que podrá usar el lector.');
         const zoomColumns = document.createElement('div');
         zoomColumns.className = 'spv-pdf-settings-columns';
 
@@ -353,10 +549,14 @@
         });
 
         function fillForm(values) {
+            const highlightColors = values.highlight_colors || {};
+
             Object.keys(colorLabels).forEach(function (key) {
                 const el = document.getElementById('spv-color-' + key);
                 if (el) {
-                    el.value = values.highlight_colors[key] || '#ffffff';
+                    const newValue = highlightColors[key] || '#ffffff';
+                    el.value = newValue;
+                    updateLinkedColorTextInput('spv-color-' + key, newValue);
                 }
             });
             Object.keys(themeInputs).forEach(function (key) {
@@ -364,12 +564,14 @@
                     || (data.defaults.theme_colors && data.defaults.theme_colors[key])
                     || themeFallbacks[key];
                 themeInputs[key].value = themeValue;
+                updateLinkedColorTextInput('spv-theme-' + key, themeValue);
             });
             opacityInput.value = values.highlight_opacity;
             copyCheckbox.checked = !!values.copy_protection;
             watermarkEnableInput.checked = !!values.watermark_enabled;
             watermarkTextarea.value = values.watermark_text;
             watermarkColorInput.value = values.watermark_color;
+            updateLinkedColorTextInput('spv-watermark-color', values.watermark_color);
             watermarkOpacityInput.value = values.watermark_opacity;
             watermarkFontInput.value = values.watermark_font_size;
             watermarkRotationInput.value = values.watermark_rotation;
@@ -469,5 +671,9 @@
         fillForm(data.defaults);
     }
 
-    document.addEventListener('DOMContentLoaded', renderApp);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', renderApp);
+    } else {
+        renderApp();
+    }
 })();

@@ -170,7 +170,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                 <section class="cloudsync-card" aria-live="polite">
                     <h2><?php esc_html_e( 'Ajustes PDF', 'secure-pdf-viewer' ); ?></h2>
                     <p class="description">
-                        <?php esc_html_e( 'Personaliza los colores, zoom predeterminado y la marca de agua que verán tus usuarios en el visor de PDF. Puedes usar las variables {user_name}, {user_email}, {pdf_id} y {date} dentro del texto de la marca de agua.', 'secure-pdf-viewer' ); ?>
+                        <?php esc_html_e( 'Personaliza los colores, zoom predeterminado y la marca de agua que verán tus usuarios en el visor de PDF. Puedes combinar variables como {user_name}, {user_email}, {user_id}, {user_role}, {user_login}, {pdf_id}, {site_name}, {site_url} y {date} dentro del texto de la marca de agua.', 'secure-pdf-viewer' ); ?>
                     </p>
                     <div id="spv-pdf-settings-root" class="spv-pdf-settings-root"></div>
                 </section>

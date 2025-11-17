@@ -30,6 +30,7 @@ require_once SPV_PLUGIN_PATH . 'includes/class-sync-manager.php';
 require_once SPV_PLUGIN_PATH . 'includes/admin-handlers.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-annotations-handler.php';
 require_once SPV_PLUGIN_PATH . 'includes/class-learndash-integration.php';
+require_once SPV_PLUGIN_PATH . 'includes/class-pdf-settings.php';
 
 class SecurePDFViewer {
     
@@ -109,6 +110,8 @@ class SecurePDFViewer {
         // Inicializar integración con LearnDash
         $this->learndash_integration = new CloudSync_LearnDash_Integration($this->cloudsync_manager);
 
+        SPV_PDF_Settings::init();
+
         $this->pdf_viewer->init();
         $this->shortcode_handler->init();
         $this->gutenberg_block->init();
@@ -146,6 +149,14 @@ class SecurePDFViewer {
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce'    => wp_create_nonce('spv_ajax_nonce')
         ));
+
+        wp_localize_script(
+            'spv-viewer',
+            'spvViewerSettings',
+            array(
+                'defaults' => SPV_PDF_Settings::prepare_frontend_settings(),
+            )
+        );
 
         // Log para debug (visible en consola)
         wp_add_inline_script('spv-viewer', 'console.log("SPV: Assets loaded v3.1.0");', 'before');

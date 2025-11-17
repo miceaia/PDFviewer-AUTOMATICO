@@ -2,6 +2,17 @@
     'use strict';
 
     const data = window.spvPdfSettings || null;
+    const WATERMARK_TOKENS = [
+        { token: '{user_name}', label: '{user_name}', description: 'Nombre visible del usuario' },
+        { token: '{user_email}', label: '{user_email}', description: 'Correo electrónico del usuario' },
+        { token: '{user_id}', label: '{user_id}', description: 'ID numérico del usuario' },
+        { token: '{user_role}', label: '{user_role}', description: 'Rol principal del usuario' },
+        { token: '{user_login}', label: '{user_login}', description: 'Nombre de acceso del usuario' },
+        { token: '{pdf_id}', label: '{pdf_id}', description: 'Identificador del PDF' },
+        { token: '{date}', label: '{date}', description: 'Fecha actual (según navegador del lector)' },
+        { token: '{site_name}', label: '{site_name}', description: 'Nombre del sitio' },
+        { token: '{site_url}', label: '{site_url}', description: 'URL del sitio' }
+    ];
 
     function createStyles() {
         if (document.getElementById('spv-pdf-settings-styles')) {
@@ -78,6 +89,34 @@
             .spv-pdf-settings-field input.invalid {
                 border-color: #d63638;
                 box-shadow: 0 0 0 1px rgba(214, 54, 56, 0.2);
+            }
+            .spv-token-buttons {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                align-items: center;
+                margin-top: 8px;
+            }
+            .spv-token-buttons__label {
+                font-size: 12px;
+                font-weight: 600;
+                color: #555d66;
+                margin-right: 8px;
+            }
+            .spv-token-buttons button {
+                border-radius: 999px;
+                border: 1px solid #c3c4c7;
+                padding: 2px 10px;
+                background: #fff;
+                cursor: pointer;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .spv-token-buttons button:hover,
+            .spv-token-buttons button:focus {
+                border-color: #2271b1;
+                color: #2271b1;
+                outline: none;
             }
         `;
         document.head.appendChild(styles);
@@ -193,6 +232,27 @@
             });
 
             return { field: field, colorInput: colorInput, textInput: textInput };
+        }
+
+        function insertTokenAtCursor(textarea, token) {
+            if (!textarea) {
+                return;
+            }
+
+            const start = textarea.selectionStart || 0;
+            const end = textarea.selectionEnd || 0;
+            const value = textarea.value || '';
+            const newValue = value.slice(0, start) + token + value.slice(end);
+            textarea.value = newValue;
+
+            const newCursor = start + token.length;
+            textarea.focus();
+            if (typeof textarea.setSelectionRange === 'function') {
+                textarea.setSelectionRange(newCursor, newCursor);
+            }
+
+            const event = new Event('input', { bubbles: true });
+            textarea.dispatchEvent(event);
         }
 
         function updateLinkedColorTextInput(id, value) {
@@ -331,10 +391,30 @@
         watermarkTextarea.style.width = '100%';
         watermarkTextarea.value = data.defaults.watermark_text;
         const watermarkHint = document.createElement('small');
-        watermarkHint.textContent = 'Variables disponibles: {{username}}, {{email}}, {{pdfId}}, {{date}}.';
+        watermarkHint.textContent = 'Variables disponibles: {user_name}, {user_email}, {user_id}, {user_role}, {user_login}, {pdf_id}, {site_name}, {site_url}, {date}.';
         watermarkTextField.appendChild(watermarkTextLabel);
         watermarkTextField.appendChild(watermarkTextarea);
         watermarkTextField.appendChild(watermarkHint);
+
+        const watermarkTokensWrapper = document.createElement('div');
+        watermarkTokensWrapper.className = 'spv-token-buttons';
+        const watermarkTokensLabel = document.createElement('span');
+        watermarkTokensLabel.className = 'spv-token-buttons__label';
+        watermarkTokensLabel.textContent = 'Insertar variable:';
+        watermarkTokensWrapper.appendChild(watermarkTokensLabel);
+
+        WATERMARK_TOKENS.forEach(function (token) {
+            const tokenButton = document.createElement('button');
+            tokenButton.type = 'button';
+            tokenButton.textContent = token.label;
+            tokenButton.title = token.description;
+            tokenButton.addEventListener('click', function () {
+                insertTokenAtCursor(watermarkTextarea, token.token);
+            });
+            watermarkTokensWrapper.appendChild(tokenButton);
+        });
+
+        watermarkTextField.appendChild(watermarkTokensWrapper);
 
         const watermarkColumns = document.createElement('div');
         watermarkColumns.className = 'spv-pdf-settings-columns';

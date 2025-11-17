@@ -65,18 +65,12 @@ $settings = cloudsync_get_settings();
         <?php esc_html_e( 'After saving credentials, use the respective OAuth consoles to grant access and paste the refresh tokens here.', 'secure-pdf-viewer' ); ?>
     </p>
 
-    <hr />
-
-    <h2><?php esc_html_e( 'Ajustes PDF', 'secure-pdf-viewer' ); ?></h2>
-    <p class="description">
-        <?php esc_html_e( 'Personaliza los colores, zoom predeterminado y la marca de agua que verán tus usuarios en el visor de PDF. Puedes usar las variables {user_name}, {user_email}, {pdf_id} y {date} dentro del texto de la marca de agua.', 'secure-pdf-viewer' ); ?>
-    </p>
-    <div id="spv-pdf-settings-root" class="spv-pdf-settings-root" aria-live="polite"></div>
+    <?php
+    /**
+     * Developers can hook into the settings page to render extra fields.
+     *
+     * @example add_action( 'cloudsync_settings_after_form', function() { echo '<p>Custom</p>'; } );
+     */
+    do_action( 'cloudsync_settings_after_form' );
+    ?>
 </div>
-<?php
-/**
- * Developers can hook into the settings page to render extra fields.
- *
- * @example add_action( 'cloudsync_settings_after_form', function() { echo '<p>Custom</p>'; } );
- */
-do_action( 'cloudsync_settings_after_form' );

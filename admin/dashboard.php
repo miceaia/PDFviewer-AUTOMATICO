@@ -167,6 +167,13 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                     </table>
                     <?php submit_button( __( 'Guardar cambios', 'secure-pdf-viewer' ) ); ?>
                 </form>
+                <section class="cloudsync-card" aria-live="polite">
+                    <h2><?php esc_html_e( 'Ajustes PDF', 'secure-pdf-viewer' ); ?></h2>
+                    <p class="description">
+                        <?php esc_html_e( 'Personaliza los colores, zoom predeterminado y la marca de agua que verán tus usuarios en el visor de PDF. Puedes usar las variables {user_name}, {user_email}, {pdf_id} y {date} dentro del texto de la marca de agua.', 'secure-pdf-viewer' ); ?>
+                    </p>
+                    <div id="spv-pdf-settings-root" class="spv-pdf-settings-root"></div>
+                </section>
             <?php elseif ( 'oauth' === $active_tab ) : ?>
                 <?php
                 $service_credentials = array(

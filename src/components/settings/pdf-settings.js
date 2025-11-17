@@ -247,6 +247,8 @@
             pink: 'Color rosa'
         };
 
+        const highlightDefaults = data.defaults.highlight_colors || {};
+
         appendDescription(highlightSection, 'Configura los colores de resaltado y protecciones que se aplicarán a las anotaciones.');
 
         Object.keys(colorLabels).forEach(function (key) {
@@ -254,7 +256,7 @@
                 labelText: colorLabels[key],
                 id: 'spv-color-' + key,
                 name: 'highlight_colors[' + key + ']',
-                value: data.defaults.highlight_colors[key] || '#ffffff'
+                value: highlightDefaults[key] || '#ffffff'
             });
             colorField.colorInput.dataset.colorKey = key;
             highlightColumns.appendChild(colorField.field);
@@ -664,10 +666,12 @@
         ].forEach(bindPreviewListener);
 
         function fillForm(values) {
+            const highlightColors = values.highlight_colors || {};
+
             Object.keys(colorLabels).forEach(function (key) {
                 const el = document.getElementById('spv-color-' + key);
                 if (el) {
-                    const newValue = values.highlight_colors[key] || '#ffffff';
+                    const newValue = highlightColors[key] || '#ffffff';
                     el.value = newValue;
                     updateLinkedColorTextInput('spv-color-' + key, newValue);
                 }

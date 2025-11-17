@@ -885,5 +885,9 @@
         fillForm(data.defaults);
     }
 
-    document.addEventListener('DOMContentLoaded', renderApp);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', renderApp);
+    } else {
+        renderApp();
+    }
 })();

@@ -56,10 +56,14 @@
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
 
             // Usuario
-            const userData = this.container.data('user-info') || {};
+            const userData = this.container.data('user-info') || this.container.data('userInfo') || {};
+            const siteInfo = this.container.data('site-info') || this.container.data('siteInfo') || {};
             this.userId = userData.id || 'anonymous';
             this.userName = userData.name || 'Usuario';
             this.userEmail = userData.email || '';
+            this.userRole = userData.role || '';
+            this.userLogin = userData.login || '';
+            this.siteInfo = siteInfo;
 
             // Highlights system
             this.highlights = {}; // { highlightId: Highlight }
@@ -385,11 +389,20 @@
                 return '';
             }
 
+            const fallbackOrigin = window.location && window.location.origin
+                ? window.location.origin
+                : `${window.location.protocol}//${window.location.host}`;
+
             const replacements = {
                 '{user_name}': this.userName,
                 '{user_email}': this.userEmail,
+                '{user_id}': this.userId,
+                '{user_role}': this.userRole,
+                '{user_login}': this.userLogin,
                 '{date}': new Date().toLocaleDateString(),
-                '{pdf_id}': this.pdfId
+                '{pdf_id}': this.pdfId,
+                '{site_name}': (this.siteInfo && this.siteInfo.name) || document.title || '',
+                '{site_url}': (this.siteInfo && this.siteInfo.url) || fallbackOrigin || ''
             };
 
             let text = template;

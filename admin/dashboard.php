@@ -167,12 +167,173 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                     </table>
                     <?php submit_button( __( 'Guardar cambios', 'secure-pdf-viewer' ) ); ?>
                 </form>
-                <section class="cloudsync-card" aria-live="polite">
+                <?php
+                $pdf_settings   = SPV_PDF_Settings::get_settings();
+                $defaults       = SPV_PDF_Settings::get_default_settings();
+                $option_name    = SPV_PDF_Settings::OPTION_NAME;
+                $theme_colors   = isset( $pdf_settings['theme_colors'] ) ? wp_parse_args( $pdf_settings['theme_colors'], $defaults['theme_colors'] ) : $defaults['theme_colors'];
+                $highlight_cols = isset( $pdf_settings['highlight_colors'] ) ? wp_parse_args( $pdf_settings['highlight_colors'], $defaults['highlight_colors'] ) : $defaults['highlight_colors'];
+                $watermark_tokens = array(
+                    '{user_name}'  => __( 'Nombre visible del usuario', 'secure-pdf-viewer' ),
+                    '{user_email}' => __( 'Correo electrónico del usuario', 'secure-pdf-viewer' ),
+                    '{user_id}'    => __( 'ID numérico del usuario', 'secure-pdf-viewer' ),
+                    '{user_role}'  => __( 'Rol principal del usuario', 'secure-pdf-viewer' ),
+                    '{user_login}' => __( 'Nombre de acceso del usuario', 'secure-pdf-viewer' ),
+                    '{pdf_id}'     => __( 'Identificador del PDF', 'secure-pdf-viewer' ),
+                    '{site_name}'  => __( 'Nombre del sitio', 'secure-pdf-viewer' ),
+                    '{site_url}'   => __( 'URL del sitio', 'secure-pdf-viewer' ),
+                    '{date}'       => __( 'Fecha local del lector', 'secure-pdf-viewer' ),
+                );
+                ?>
+                <section class="cloudsync-card cloudsync-card--pdf-settings" aria-live="polite">
                     <h2><?php esc_html_e( 'Ajustes PDF', 'secure-pdf-viewer' ); ?></h2>
                     <p class="description">
-                        <?php esc_html_e( 'Personaliza los colores, zoom predeterminado y la marca de agua que verán tus usuarios en el visor de PDF. Puedes usar las variables {user_name}, {user_email}, {pdf_id} y {date} dentro del texto de la marca de agua.', 'secure-pdf-viewer' ); ?>
+                        <?php esc_html_e( 'Personaliza los colores del visor, define los valores de zoom y crea una marca de agua dinámica usando las variables disponibles.', 'secure-pdf-viewer' ); ?>
                     </p>
-                    <div id="spv-pdf-settings-root" class="spv-pdf-settings-root"></div>
+                    <form method="post" action="<?php echo esc_url( admin_url( 'options.php' ) ); ?>" id="spv-pdf-settings-form" class="spv-pdf-settings-form">
+                        <?php settings_fields( 'spv_pdf_viewer' ); ?>
+
+                        <div class="spv-settings-section">
+                            <div class="spv-settings-section__header">
+                                <h3><?php esc_html_e( 'Tema del visor', 'secure-pdf-viewer' ); ?></h3>
+                                <p><?php esc_html_e( 'Estos colores alimentan botones, acentos y el contraste principal del visor.', 'secure-pdf-viewer' ); ?></p>
+                            </div>
+                            <div class="spv-settings-grid">
+                                <?php
+                                $theme_labels = array(
+                                    'base'          => __( 'Color base', 'secure-pdf-viewer' ),
+                                    'base_dark'     => __( 'Color hover/oscuro', 'secure-pdf-viewer' ),
+                                    'base_contrast' => __( 'Color de texto sobre el tema', 'secure-pdf-viewer' ),
+                                );
+                                foreach ( $theme_labels as $slug => $label ) :
+                                    $input_id = 'spv-theme-' . sanitize_key( $slug );
+                                    $value    = isset( $theme_colors[ $slug ] ) ? strtoupper( $theme_colors[ $slug ] ) : '#FFFFFF';
+                                    ?>
+                                    <div class="spv-field spv-field--color">
+                                        <label for="<?php echo esc_attr( $input_id ); ?>"><?php echo esc_html( $label ); ?></label>
+                                        <div class="spv-color-control">
+                                            <input type="color" id="<?php echo esc_attr( $input_id ); ?>" name="<?php echo esc_attr( $option_name ); ?>[theme_colors][<?php echo esc_attr( $slug ); ?>]" value="<?php echo esc_attr( $value ); ?>" />
+                                            <input type="text" class="regular-text spv-color-code" value="<?php echo esc_attr( $value ); ?>" maxlength="7" placeholder="#AABBCC" />
+                                        </div>
+                                        <p class="description"><?php esc_html_e( 'Acepta valores HEX (#RRGGBB).', 'secure-pdf-viewer' ); ?></p>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+
+                        <div class="spv-settings-section">
+                            <div class="spv-settings-section__header">
+                                <h3><?php esc_html_e( 'Colores y anotaciones', 'secure-pdf-viewer' ); ?></h3>
+                                <p><?php esc_html_e( 'Define los resaltados disponibles, la opacidad y la protección contra copias.', 'secure-pdf-viewer' ); ?></p>
+                            </div>
+                            <div class="spv-settings-grid">
+                                <?php
+                                $highlight_labels = array(
+                                    'yellow' => __( 'Color amarillo', 'secure-pdf-viewer' ),
+                                    'green'  => __( 'Color verde', 'secure-pdf-viewer' ),
+                                    'blue'   => __( 'Color azul', 'secure-pdf-viewer' ),
+                                    'pink'   => __( 'Color rosa', 'secure-pdf-viewer' ),
+                                );
+                                foreach ( $highlight_labels as $slug => $label ) :
+                                    $input_id = 'spv-highlight-' . sanitize_key( $slug );
+                                    $value    = isset( $highlight_cols[ $slug ] ) ? strtoupper( $highlight_cols[ $slug ] ) : '#FFFFFF';
+                                    ?>
+                                    <div class="spv-field spv-field--color">
+                                        <label for="<?php echo esc_attr( $input_id ); ?>"><?php echo esc_html( $label ); ?></label>
+                                        <div class="spv-color-control">
+                                            <input type="color" id="<?php echo esc_attr( $input_id ); ?>" name="<?php echo esc_attr( $option_name ); ?>[highlight_colors][<?php echo esc_attr( $slug ); ?>]" value="<?php echo esc_attr( $value ); ?>" />
+                                            <input type="text" class="regular-text spv-color-code" value="<?php echo esc_attr( $value ); ?>" maxlength="7" placeholder="#AABBCC" />
+                                        </div>
+                                        <p class="description"><?php esc_html_e( 'Sugerencia: usa colores contrastantes para cada herramienta.', 'secure-pdf-viewer' ); ?></p>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <div class="spv-inline-field-group">
+                                <div class="spv-field">
+                                    <label for="spv-highlight-opacity"><?php esc_html_e( 'Opacidad de resaltado', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-highlight-opacity" name="<?php echo esc_attr( $option_name ); ?>[highlight_opacity]" min="0" max="1" step="0.05" value="<?php echo esc_attr( $pdf_settings['highlight_opacity'] ); ?>" />
+                                    <p class="description"><?php esc_html_e( 'Valores entre 0 y 1. Un valor bajo resulta más discreto.', 'secure-pdf-viewer' ); ?></p>
+                                </div>
+                                <div class="spv-field">
+                                    <label class="spv-checkbox" for="spv-copy-protection">
+                                        <input type="checkbox" id="spv-copy-protection" name="<?php echo esc_attr( $option_name ); ?>[copy_protection]" value="1" <?php checked( (int) $pdf_settings['copy_protection'], 1 ); ?> />
+                                        <?php esc_html_e( 'Activar protección contra copiado', 'secure-pdf-viewer' ); ?>
+                                    </label>
+                                    <p class="description"><?php esc_html_e( 'Deshabilita selección de texto y combinaciones comunes para copiar.', 'secure-pdf-viewer' ); ?></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="spv-settings-section">
+                            <div class="spv-settings-section__header">
+                                <h3><?php esc_html_e( 'Marca de agua', 'secure-pdf-viewer' ); ?></h3>
+                                <p><?php esc_html_e( 'Combina texto libre con variables dinámicas para identificar al lector.', 'secure-pdf-viewer' ); ?></p>
+                            </div>
+                            <div class="spv-field">
+                                <label class="spv-checkbox" for="spv-watermark-enabled">
+                                    <input type="checkbox" id="spv-watermark-enabled" name="<?php echo esc_attr( $option_name ); ?>[watermark_enabled]" value="1" <?php checked( (int) $pdf_settings['watermark_enabled'], 1 ); ?> />
+                                    <?php esc_html_e( 'Mostrar marca de agua en cada página', 'secure-pdf-viewer' ); ?>
+                                </label>
+                            </div>
+                            <div class="spv-field spv-field--full">
+                                <label for="spv-watermark-text"><?php esc_html_e( 'Texto de marca de agua', 'secure-pdf-viewer' ); ?></label>
+                                <textarea id="spv-watermark-text" name="<?php echo esc_attr( $option_name ); ?>[watermark_text]" rows="3" class="large-text"><?php echo esc_textarea( $pdf_settings['watermark_text'] ); ?></textarea>
+                                <p class="description"><?php esc_html_e( 'Haz clic para insertar variables:', 'secure-pdf-viewer' ); ?></p>
+                                <div class="spv-token-gallery" role="list">
+                                    <?php foreach ( $watermark_tokens as $token => $description ) : ?>
+                                        <button type="button" class="button" data-insert-token="<?php echo esc_attr( $token ); ?>" data-token-target="spv-watermark-text" title="<?php echo esc_attr( $description ); ?>"><?php echo esc_html( $token ); ?></button>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            <div class="spv-settings-grid">
+                                <div class="spv-field spv-field--color">
+                                    <label for="spv-watermark-color"><?php esc_html_e( 'Color', 'secure-pdf-viewer' ); ?></label>
+                                    <div class="spv-color-control">
+                                        <input type="color" id="spv-watermark-color" name="<?php echo esc_attr( $option_name ); ?>[watermark_color]" value="<?php echo esc_attr( strtoupper( $pdf_settings['watermark_color'] ) ); ?>" />
+                                        <input type="text" class="regular-text spv-color-code" value="<?php echo esc_attr( strtoupper( $pdf_settings['watermark_color'] ) ); ?>" maxlength="7" placeholder="#AABBCC" />
+                                    </div>
+                                </div>
+                                <div class="spv-field">
+                                    <label for="spv-watermark-opacity"><?php esc_html_e( 'Opacidad', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-watermark-opacity" name="<?php echo esc_attr( $option_name ); ?>[watermark_opacity]" min="0" max="1" step="0.05" value="<?php echo esc_attr( $pdf_settings['watermark_opacity'] ); ?>" />
+                                </div>
+                                <div class="spv-field">
+                                    <label for="spv-watermark-font"><?php esc_html_e( 'Tamaño de fuente (px)', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-watermark-font" name="<?php echo esc_attr( $option_name ); ?>[watermark_font_size]" min="8" max="72" step="1" value="<?php echo esc_attr( $pdf_settings['watermark_font_size'] ); ?>" />
+                                </div>
+                                <div class="spv-field">
+                                    <label for="spv-watermark-rotation"><?php esc_html_e( 'Rotación (°)', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-watermark-rotation" name="<?php echo esc_attr( $option_name ); ?>[watermark_rotation]" min="-90" max="90" step="1" value="<?php echo esc_attr( $pdf_settings['watermark_rotation'] ); ?>" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="spv-settings-section">
+                            <div class="spv-settings-section__header">
+                                <h3><?php esc_html_e( 'Zoom predeterminado', 'secure-pdf-viewer' ); ?></h3>
+                                <p><?php esc_html_e( 'Controla el nivel inicial y los límites que verán los usuarios.', 'secure-pdf-viewer' ); ?></p>
+                            </div>
+                            <div class="spv-settings-grid">
+                                <div class="spv-field">
+                                    <label for="spv-default-zoom"><?php esc_html_e( 'Zoom por defecto', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-default-zoom" name="<?php echo esc_attr( $option_name ); ?>[default_zoom]" min="0.1" max="5" step="0.1" value="<?php echo esc_attr( $pdf_settings['default_zoom'] ); ?>" />
+                                </div>
+                                <div class="spv-field">
+                                    <label for="spv-min-zoom"><?php esc_html_e( 'Zoom mínimo', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-min-zoom" name="<?php echo esc_attr( $option_name ); ?>[min_zoom]" min="0.1" max="5" step="0.1" value="<?php echo esc_attr( $pdf_settings['min_zoom'] ); ?>" />
+                                </div>
+                                <div class="spv-field">
+                                    <label for="spv-max-zoom"><?php esc_html_e( 'Zoom máximo', 'secure-pdf-viewer' ); ?></label>
+                                    <input type="number" id="spv-max-zoom" name="<?php echo esc_attr( $option_name ); ?>[max_zoom]" min="0.5" max="10" step="0.1" value="<?php echo esc_attr( $pdf_settings['max_zoom'] ); ?>" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="spv-settings-actions">
+                            <?php submit_button( __( 'Guardar ajustes PDF', 'secure-pdf-viewer' ), 'primary', 'submit', false ); ?>
+                            <button type="reset" class="button button-secondary"><?php esc_html_e( 'Descartar cambios sin guardar', 'secure-pdf-viewer' ); ?></button>
+                        </div>
+                    </form>
                 </section>
             <?php elseif ( 'oauth' === $active_tab ) : ?>
                 <?php

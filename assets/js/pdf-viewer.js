@@ -139,11 +139,9 @@
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
 
             // Usuario
-            const userData = parseUserInfoPayload(this.container);
-            this.userId = userData.id || userData.user_id || 'anonymous';
-            this.userLogin = userData.username || userData.user_login || '';
-            this.userDisplayName = userData.name || userData.display_name || '';
-            this.userName = this.userLogin || this.userDisplayName || 'Usuario';
+            const userData = this.getUserInfoPayload();
+            this.userId = userData.id || 'anonymous';
+            this.userName = userData.name || 'Usuario';
             this.userEmail = userData.email || '';
             this.userRole = userData.role || '';
             this.userLogin = userData.login || '';
@@ -465,6 +463,56 @@
             const b = parseInt(hex.substring(4, 6), 16) || 0;
             const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
             return luminance > 0.6 ? '#333333' : '#ffffff';
+        }
+
+        getUserInfoPayload() {
+            const dataValue = this.container.data('user-info');
+
+            if (dataValue && typeof dataValue === 'object') {
+                return dataValue;
+            }
+
+            const attrValue = this.container.attr('data-user-info');
+            const attempts = [];
+
+            if (typeof dataValue === 'string') {
+                attempts.push(dataValue);
+            }
+
+            if (typeof attrValue === 'string') {
+                attempts.push(attrValue);
+            }
+
+            const decodedAttr = this.decodeHtmlEntities(attrValue);
+            if (decodedAttr && decodedAttr !== attrValue) {
+                attempts.push(decodedAttr);
+            }
+
+            for (let i = 0; i < attempts.length; i++) {
+                const candidate = attempts[i];
+
+                if (typeof candidate !== 'string' || !candidate.trim()) {
+                    continue;
+                }
+
+                try {
+                    return JSON.parse(candidate);
+                } catch (error) {
+                    // Keep trying other candidates.
+                }
+            }
+
+            return {};
+        }
+
+        decodeHtmlEntities(value) {
+            if (typeof value !== 'string' || value.indexOf('&') === -1) {
+                return value || '';
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = value;
+            return textarea.value;
         }
 
         normalizeWatermarkTemplate(template) {

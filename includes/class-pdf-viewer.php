@@ -36,7 +36,7 @@ class SPV_PDF_Viewer {
              style="width: <?php echo esc_attr($width); ?>; height: <?php echo esc_attr($height); ?>;"
              data-pdf-url="<?php echo esc_url($pdf_url); ?>"
              data-pdf-id="<?php echo esc_attr($pdf_id); ?>"
-             data-user-info='<?php echo $user_data_attribute; ?>'>
+             data-user-info='<?php echo esc_attr( wp_json_encode( $user_data ) ); ?>'>
 
             <?php if ($title): ?>
                 <h3 class="spv-title"><?php echo esc_html($title); ?></h3>

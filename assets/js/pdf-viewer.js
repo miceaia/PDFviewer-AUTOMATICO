@@ -117,9 +117,21 @@
             this.container = $(container);
             this.pdfUrl = this.container.data('pdf-url');
             this.pdfId = this.container.data('pdf-id') || 'default';
-            this.canvas = this.container.find('.spv-pdf-canvas')[0];
-            this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
+            this.canvas = this.canvasContainer.find('.spv-pdf-canvas')[0] || null;
+
+            if (!this.canvas && this.canvasContainer.length) {
+                this.canvas = document.createElement('canvas');
+                this.canvas.className = 'spv-pdf-canvas';
+                this.canvasContainer.first().prepend(this.canvas);
+            }
+
+            this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+
+            if (!this.canvasContainer.length || !this.canvas || !this.ctx) {
+                this.displayBootstrapError('No se pudo inicializar el lienzo del visor.');
+                return;
+            }
 
             const perViewerSettings = this.container.data('viewer-settings') || this.container.data('viewerSettings') || {};
             const globalSettings = (window.spvViewerSettings && window.spvViewerSettings.defaults) || {};
@@ -472,33 +484,55 @@
                 return dataValue;
             }
 
-            const attrValue = this.container.attr('data-user-info');
             const attempts = [];
+            const seen = new Set();
+            const format = (this.container.attr('data-user-info-format') || '').toLowerCase();
+            const maybeBase64 = format === 'base64';
+
+            const pushCandidate = (candidate, options = {}) => {
+                if (typeof candidate !== 'string') {
+                    return;
+                }
+
+                const trimmed = candidate.trim();
+                if (!trimmed || seen.has(trimmed)) {
+                    return;
+                }
+
+                seen.add(trimmed);
+                attempts.push(trimmed);
+
+                const forceBase64 = options.forceBase64 || maybeBase64;
+                if (forceBase64 || this.looksLikeBase64(trimmed)) {
+                    const decoded = this.decodeBase64Value(trimmed);
+                    if (decoded && !seen.has(decoded)) {
+                        seen.add(decoded);
+                        attempts.push(decoded);
+                    }
+                }
+            };
 
             if (typeof dataValue === 'string') {
-                attempts.push(dataValue);
+                pushCandidate(dataValue);
             }
 
-            if (typeof attrValue === 'string') {
-                attempts.push(attrValue);
-            }
+            const attrValue = this.container.attr('data-user-info');
+            pushCandidate(attrValue, { forceBase64: maybeBase64 });
 
             const decodedAttr = this.decodeHtmlEntities(attrValue);
             if (decodedAttr && decodedAttr !== attrValue) {
-                attempts.push(decodedAttr);
+                pushCandidate(decodedAttr, { forceBase64: maybeBase64 });
+            }
+
+            const scriptValue = this.getUserInfoScriptPayload();
+            if (scriptValue) {
+                pushCandidate(scriptValue);
             }
 
             for (let i = 0; i < attempts.length; i++) {
-                const candidate = attempts[i];
-
-                if (typeof candidate !== 'string' || !candidate.trim()) {
-                    continue;
-                }
-
-                try {
-                    return JSON.parse(candidate);
-                } catch (error) {
-                    // Keep trying other candidates.
+                const parsed = this.safeJsonParse(attempts[i]);
+                if (parsed) {
+                    return parsed;
                 }
             }
 
@@ -513,6 +547,52 @@
             const textarea = document.createElement('textarea');
             textarea.innerHTML = value;
             return textarea.value;
+        }
+
+        getUserInfoScriptPayload() {
+            const script = this.container.find('script.spv-user-info').first();
+            if (!script.length) {
+                return '';
+            }
+
+            return script.text().trim();
+        }
+
+        looksLikeBase64(value) {
+            if (typeof value !== 'string') {
+                return false;
+            }
+
+            const sanitized = value.replace(/\s+/g, '');
+            if (!sanitized || sanitized.length % 4 !== 0) {
+                return false;
+            }
+
+            return /^[A-Za-z0-9+/=]+$/.test(sanitized);
+        }
+
+        decodeBase64Value(value) {
+            if (typeof value !== 'string' || typeof window.atob !== 'function') {
+                return '';
+            }
+
+            try {
+                return window.atob(value.replace(/\s+/g, ''));
+            } catch (error) {
+                return '';
+            }
+        }
+
+        safeJsonParse(value) {
+            if (typeof value !== 'string' || !value.trim()) {
+                return null;
+            }
+
+            try {
+                return JSON.parse(value);
+            } catch (error) {
+                return null;
+            }
         }
 
         normalizeWatermarkTemplate(template) {
@@ -1173,6 +1253,22 @@
                 message +
                 '</div>'
             );
+        }
+
+        displayBootstrapError(message) {
+            console.error(message);
+            this.container.addClass('spv-viewer--error');
+            const canvasContainer = this.container.find('.spv-canvas-container');
+
+            if (canvasContainer.length) {
+                canvasContainer.empty().append(
+                    $('<div class="spv-error" role="alert"></div>').text(message)
+                );
+            } else {
+                this.container.prepend(
+                    $('<div class="spv-error" role="alert"></div>').text(message)
+                );
+            }
         }
     }
 

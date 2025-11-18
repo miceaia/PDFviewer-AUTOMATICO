@@ -22,13 +22,15 @@ class SPV_PDF_Viewer {
         $user_roles   = is_array( $current_user->roles ) ? $current_user->roles : array();
 
         $user_data = array(
-            'name'     => $current_user->display_name,
-            'username' => $current_user->user_login,
-            'email'    => $current_user->user_email,
-            'id'       => $current_user->ID,
+            'name'  => $current_user->display_name,
+            'email' => $current_user->user_email,
+            'id'    => $current_user->ID,
         );
 
-        $user_data_attribute = esc_attr( wp_json_encode( $user_data ) );
+        $user_data_json   = wp_json_encode( $user_data );
+        $user_data_json   = false === $user_data_json ? '{}' : $user_data_json;
+        $user_data_base64 = base64_encode( $user_data_json );
+        $user_data_base64 = $user_data_base64 ? $user_data_base64 : '';
 
         ob_start();
         ?>
@@ -36,7 +38,12 @@ class SPV_PDF_Viewer {
              style="width: <?php echo esc_attr($width); ?>; height: <?php echo esc_attr($height); ?>;"
              data-pdf-url="<?php echo esc_url($pdf_url); ?>"
              data-pdf-id="<?php echo esc_attr($pdf_id); ?>"
-             data-user-info='<?php echo esc_attr( wp_json_encode( $user_data ) ); ?>'>
+             data-user-info="<?php echo esc_attr( $user_data_base64 ); ?>"
+             data-user-info-format="base64">
+
+            <script type="application/json" class="spv-user-info" aria-hidden="true">
+                <?php echo wp_kses( $user_data_json, array() ); ?>
+            </script>
 
             <?php if ($title): ?>
                 <h3 class="spv-title"><?php echo esc_html($title); ?></h3>

@@ -1,6 +1,8 @@
 (function($) {
     'use strict';
 
+    const WATERMARK_TOKEN_REGEX = /\{\{\s*([^}]+)\s*\}\}|\{([^}]+)\}/g;
+
     const DEFAULT_VIEWER_SETTINGS = {
         default_zoom: 1.5,
         min_zoom: 0.5,
@@ -18,13 +20,92 @@
             base_contrast: '#ffffff'
         },
         watermark_enabled: 1,
-        watermark_text: 'Usuario: {user_name} · Fecha: {date}',
+        watermark_text: 'Usuario: {{username}} · Fecha: {{date}}',
         watermark_color: '#000000',
         watermark_opacity: 0.15,
         watermark_font_size: 14,
+        watermark_font_family: 'Arial',
         watermark_rotation: -30,
+        watermark_position: 'center',
         copy_protection: 1
     };
+
+    function normalizeTemplateText(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        return value
+            .replace(/&(?:#123|#x7b|lcub);/gi, '{')
+            .replace(/&(?:#125|#x7d|rcub);/gi, '}');
+    }
+
+    function resolveWatermarkTemplate(template, replacements) {
+        if (!template || typeof template !== 'string') {
+            return '';
+        }
+
+        const normalizedTemplate = normalizeTemplateText(template);
+
+        return normalizedTemplate.replace(WATERMARK_TOKEN_REGEX, (match, doubleToken, singleToken) => {
+            const rawToken = (doubleToken || singleToken || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9_]/g, '');
+
+            if (!rawToken) {
+                return '';
+            }
+
+            if (Object.prototype.hasOwnProperty.call(replacements, rawToken)) {
+                const value = replacements[rawToken];
+                return typeof value === 'undefined' || value === null ? '' : String(value);
+            }
+
+            return '';
+        });
+    }
+
+    function decodeHtmlEntities(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+
+        return value
+            .replace(/&quot;/g, '"')
+            .replace(/&#039;/g, "'")
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&');
+    }
+
+    function parseUserInfoPayload($element) {
+        if (!$element || !$element.length) {
+            return {};
+        }
+
+        const dataValue = $element.data('user-info');
+        if (dataValue && typeof dataValue === 'object') {
+            return dataValue;
+        }
+
+        if (typeof dataValue === 'string') {
+            try {
+                return JSON.parse(dataValue);
+            } catch (error) {
+                // Continue to attribute fallback
+            }
+        }
+
+        const attrValue = $element.attr('data-user-info');
+        if (typeof attrValue === 'string' && attrValue.length) {
+            try {
+                return JSON.parse(decodeHtmlEntities(attrValue));
+            } catch (error) {
+                return {};
+            }
+        }
+
+        return {};
+    }
 
     // Configurar PDF.js worker
     if (typeof pdfjsLib !== 'undefined') {
@@ -52,7 +133,9 @@
                 return;
             }
 
-            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, (window.spvViewerSettings && window.spvViewerSettings.defaults) || {});
+            const perViewerSettings = this.container.data('viewer-settings') || this.container.data('viewerSettings') || {};
+            const globalSettings = (window.spvViewerSettings && window.spvViewerSettings.defaults) || {};
+            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, globalSettings, perViewerSettings);
 
             this.applyThemeColors();
 
@@ -72,6 +155,9 @@
             this.userId = userData.id || 'anonymous';
             this.userName = userData.name || 'Usuario';
             this.userEmail = userData.email || '';
+            this.userRole = userData.role || '';
+            this.userLogin = userData.login || '';
+            this.siteInfo = siteInfo;
 
             // Highlights system
             this.highlights = {}; // { highlightId: Highlight }
@@ -358,7 +444,7 @@
                     return;
                 }
 
-                const color = this.getHighlightColor(btn.key);
+                const color = button.data('color') || this.getHighlightColor(btn.key);
                 const textColor = this.getAccessibleTextColor(color);
 
                 button.css({
@@ -593,19 +679,26 @@
             this.ctx.globalAlpha = this.preferences.watermark_opacity || 0.15;
             this.ctx.fillStyle = this.preferences.watermark_color || '#000000';
             const fontSize = this.preferences.watermark_font_size || 14;
-            this.ctx.font = `${fontSize}px Arial`;
+            const fontFamily = this.preferences.watermark_font_family || 'Arial';
+            this.ctx.font = `${fontSize}px ${fontFamily}`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
 
-            const centerX = this.canvas.width / 2;
-            const centerY = this.canvas.height / 2;
+            const rotationRadians = ((typeof this.preferences.watermark_rotation === 'number'
+                ? this.preferences.watermark_rotation
+                : -30) * Math.PI) / 180;
 
-            this.ctx.translate(centerX, centerY);
-            const rotationRadians = (this.preferences.watermark_rotation || -30) * Math.PI / 180;
-            this.ctx.rotate(rotationRadians);
+            const positions = this.getWatermarkPositions(this.preferences.watermark_position);
 
-            const textWidth = this.ctx.measureText(watermarkText).width;
-            this.ctx.fillText(watermarkText, -textWidth / 2, 0);
-            this.ctx.fillText(watermarkText, -textWidth / 2, -this.canvas.height / 3);
-            this.ctx.fillText(watermarkText, -textWidth / 2, this.canvas.height / 3);
+            positions.forEach((point) => {
+                this.ctx.save();
+                this.ctx.translate(point.x, point.y);
+                if (rotationRadians) {
+                    this.ctx.rotate(rotationRadians);
+                }
+                this.ctx.fillText(watermarkText, 0, 0);
+                this.ctx.restore();
+            });
 
             this.ctx.restore();
         }

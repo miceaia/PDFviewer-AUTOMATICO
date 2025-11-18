@@ -9,8 +9,18 @@ class SPV_PDF_Viewer {
         // ID único para el canvas
         $canvas_id = 'spv-pdf-canvas-' . uniqid();
 
+        $viewer_settings  = SPV_PDF_Settings::prepare_frontend_settings();
+        $highlight_colors = isset( $viewer_settings['highlight_colors'] ) && is_array( $viewer_settings['highlight_colors'] )
+            ? $viewer_settings['highlight_colors']
+            : array();
+        $default_zoom_percent = isset( $viewer_settings['default_zoom'] )
+            ? max( 10, min( 500, intval( round( $viewer_settings['default_zoom'] * 100 ) ) ) )
+            : 150;
+
         // Obtener datos del usuario actual
         $current_user = wp_get_current_user();
+        $user_roles   = is_array( $current_user->roles ) ? $current_user->roles : array();
+
         $user_data = array(
             'name'  => $current_user->display_name,
             'email' => $current_user->user_email,
@@ -62,29 +72,49 @@ class SPV_PDF_Viewer {
 
                 <!-- Herramientas de anotación - Colores de subrayado -->
                 <div class="spv-control-group spv-annotation-tools">
-                    <button type="button" id="hl-yellow" class="spv-btn spv-color-btn" data-color="#ffff00"
-                            style="background: #ffff00; color: #333;"
+                    <?php
+                    $yellow_color = $this->get_highlight_color( $highlight_colors, 'yellow', '#ffff00' );
+                    $yellow_text  = $this->get_contrast_color( $yellow_color );
+                    ?>
+                    <button type="button" id="hl-yellow" class="spv-btn spv-color-btn"
+                            data-color="<?php echo esc_attr( $yellow_color ); ?>"
+                            style="background: <?php echo esc_attr( $yellow_color ); ?>; color: <?php echo esc_attr( $yellow_text ); ?>;"
                             title="<?php _e('Subrayar en amarillo', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Subrayar en amarillo', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-edit" aria-hidden="true"></span>
                     </button>
 
-                    <button type="button" id="hl-green" class="spv-btn spv-color-btn" data-color="#00ff00"
-                            style="background: #00ff00; color: #333;"
+                    <?php
+                    $green_color = $this->get_highlight_color( $highlight_colors, 'green', '#00ff00' );
+                    $green_text  = $this->get_contrast_color( $green_color );
+                    ?>
+                    <button type="button" id="hl-green" class="spv-btn spv-color-btn"
+                            data-color="<?php echo esc_attr( $green_color ); ?>"
+                            style="background: <?php echo esc_attr( $green_color ); ?>; color: <?php echo esc_attr( $green_text ); ?>;"
                             title="<?php _e('Subrayar en verde', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Subrayar en verde', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-edit" aria-hidden="true"></span>
                     </button>
 
-                    <button type="button" id="hl-blue" class="spv-btn spv-color-btn" data-color="#00bfff"
-                            style="background: #00bfff; color: #fff;"
+                    <?php
+                    $blue_color = $this->get_highlight_color( $highlight_colors, 'blue', '#00bfff' );
+                    $blue_text  = $this->get_contrast_color( $blue_color );
+                    ?>
+                    <button type="button" id="hl-blue" class="spv-btn spv-color-btn"
+                            data-color="<?php echo esc_attr( $blue_color ); ?>"
+                            style="background: <?php echo esc_attr( $blue_color ); ?>; color: <?php echo esc_attr( $blue_text ); ?>;"
                             title="<?php _e('Subrayar en azul', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Subrayar en azul', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-edit" aria-hidden="true"></span>
                     </button>
 
-                    <button type="button" id="hl-pink" class="spv-btn spv-color-btn" data-color="#ff69b4"
-                            style="background: #ff69b4; color: #fff;"
+                    <?php
+                    $pink_color = $this->get_highlight_color( $highlight_colors, 'pink', '#ff69b4' );
+                    $pink_text  = $this->get_contrast_color( $pink_color );
+                    ?>
+                    <button type="button" id="hl-pink" class="spv-btn spv-color-btn"
+                            data-color="<?php echo esc_attr( $pink_color ); ?>"
+                            style="background: <?php echo esc_attr( $pink_color ); ?>; color: <?php echo esc_attr( $pink_text ); ?>;"
                             title="<?php _e('Subrayar en rosa', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Subrayar en rosa', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-edit" aria-hidden="true"></span>
@@ -119,7 +149,7 @@ class SPV_PDF_Viewer {
                             aria-label="<?php _e('Alejar', 'secure-pdf-viewer'); ?>">
                         <span class="dashicons dashicons-minus" aria-hidden="true"></span>
                     </button>
-                    <span id="zoom-label" class="spv-zoom-level" role="status" aria-live="polite">150%</span>
+                    <span id="zoom-label" class="spv-zoom-level" role="status" aria-live="polite"><?php echo esc_html( $default_zoom_percent ); ?>%</span>
                     <button type="button" id="btn-zoom-in" class="spv-btn spv-zoom-in"
                             title="<?php _e('Acercar', 'secure-pdf-viewer'); ?>"
                             aria-label="<?php _e('Acercar', 'secure-pdf-viewer'); ?>">
@@ -158,5 +188,37 @@ class SPV_PDF_Viewer {
         </div>
         <?php
         return ob_get_clean();
+    }
+
+    protected function get_highlight_color( $colors, $slug, $fallback ) {
+        if ( isset( $colors[ $slug ] ) && is_string( $colors[ $slug ] ) && preg_match( '/^#([a-f0-9]{3}){1,2}$/i', $colors[ $slug ] ) ) {
+            return strtolower( $colors[ $slug ] );
+        }
+
+        return $fallback;
+    }
+
+    protected function get_contrast_color( $hex_color ) {
+        if ( ! is_string( $hex_color ) ) {
+            return '#ffffff';
+        }
+
+        $hex = ltrim( $hex_color, '#' );
+
+        if ( 3 === strlen( $hex ) ) {
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
+        }
+
+        if ( 6 !== strlen( $hex ) ) {
+            return '#ffffff';
+        }
+
+        $r = hexdec( substr( $hex, 0, 2 ) );
+        $g = hexdec( substr( $hex, 2, 2 ) );
+        $b = hexdec( substr( $hex, 4, 2 ) );
+
+        $luminance = ( 0.299 * $r + 0.587 * $g + 0.114 * $b ) / 255;
+
+        return $luminance > 0.6 ? '#333333' : '#ffffff';
     }
 }

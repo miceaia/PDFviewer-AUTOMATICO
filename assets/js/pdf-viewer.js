@@ -56,7 +56,7 @@
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
 
             // Usuario
-            const userData = this.container.data('user-info') || {};
+            const userData = this.getUserInfoPayload();
             this.userId = userData.id || 'anonymous';
             this.userName = userData.name || 'Usuario';
             this.userEmail = userData.email || '';
@@ -379,27 +379,123 @@
             return luminance > 0.6 ? '#333333' : '#ffffff';
         }
 
+        getUserInfoPayload() {
+            const dataValue = this.container.data('user-info');
+
+            if (dataValue && typeof dataValue === 'object') {
+                return dataValue;
+            }
+
+            const attrValue = this.container.attr('data-user-info');
+            const attempts = [];
+
+            if (typeof dataValue === 'string') {
+                attempts.push(dataValue);
+            }
+
+            if (typeof attrValue === 'string') {
+                attempts.push(attrValue);
+            }
+
+            const decodedAttr = this.decodeHtmlEntities(attrValue);
+            if (decodedAttr && decodedAttr !== attrValue) {
+                attempts.push(decodedAttr);
+            }
+
+            for (let i = 0; i < attempts.length; i++) {
+                const candidate = attempts[i];
+
+                if (typeof candidate !== 'string' || !candidate.trim()) {
+                    continue;
+                }
+
+                try {
+                    return JSON.parse(candidate);
+                } catch (error) {
+                    // Keep trying other candidates.
+                }
+            }
+
+            return {};
+        }
+
+        decodeHtmlEntities(value) {
+            if (typeof value !== 'string' || value.indexOf('&') === -1) {
+                return value || '';
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = value;
+            return textarea.value;
+        }
+
+        normalizeWatermarkTemplate(template) {
+            if (typeof template !== 'string') {
+                return '';
+            }
+
+            return template
+                .replace(/&(lcub|#123|#x7b);/gi, '{')
+                .replace(/&(rcub|#125|#x7d);/gi, '}');
+        }
+
+        escapeTokenForRegex(token) {
+            return token.replace(/[-/\^$*+?.()|[\]{}]/g, '\\$&');
+        }
+
+        getWatermarkTemplateReplacements() {
+            const now = new Date();
+            const date = now.toLocaleDateString();
+            const time = now.toLocaleTimeString();
+            const dateTime = now.toLocaleString();
+            const timestamp = now.toISOString();
+            const username = this.userName || '';
+            const email = this.userEmail || '';
+            const pdfId = this.pdfId || '';
+            const userId = this.userId || '';
+
+            return {
+                '{user_name}': username,
+                '{user_email}': email,
+                '{pdf_id}': pdfId,
+                '{user_id}': userId,
+                '{date}': date,
+                '{time}': time,
+                '{datetime}': dateTime,
+                '{timestamp}': timestamp,
+                '{{username}}': username,
+                '{{user_name}}': username,
+                '{{name}}': username,
+                '{{email}}': email,
+                '{{user_email}}': email,
+                '{{user_id}}': userId,
+                '{{pdf_id}}': pdfId,
+                '{{date}}': date,
+                '{{time}}': time,
+                '{{datetime}}': dateTime,
+                '{{timestamp}}': timestamp
+            };
+        }
+
         getWatermarkText() {
             const template = this.preferences.watermark_text || '';
             if (!template) {
                 return '';
             }
 
-            const replacements = {
-                '{user_name}': this.userName,
-                '{user_email}': this.userEmail,
-                '{date}': new Date().toLocaleDateString(),
-                '{pdf_id}': this.pdfId
-            };
+            let normalized = this.normalizeWatermarkTemplate(template);
+            const replacements = this.getWatermarkTemplateReplacements();
 
-            let text = template;
+            Object.keys(replacements).forEach((token) => {
+                const value = typeof replacements[token] === 'undefined' || replacements[token] === null
+                    ? ''
+                    : String(replacements[token]);
 
-            Object.keys(replacements).forEach(token => {
-                const value = replacements[token] || '';
-                text = text.replace(new RegExp(token, 'g'), value);
+                const pattern = new RegExp(this.escapeTokenForRegex(token), 'gi');
+                normalized = normalized.replace(pattern, value);
             });
 
-            return text;
+            return normalized;
         }
 
         addWatermarkToPage() {

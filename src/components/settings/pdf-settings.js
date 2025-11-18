@@ -102,15 +102,14 @@
         document.head.appendChild(styles);
     }
 
-    function renderApp() {
-        const root = document.getElementById('spv-pdf-settings-root');
-        if (!root) {
-            return;
+        if (hex.length === 3) {
+            hex = hex.split('').map(function (char) {
+                return char + char;
+            }).join('');
         }
 
-        if (!data || !data.restUrl || !data.nonce || !data.defaults) {
-            root.textContent = 'No se pudieron cargar los ajustes. Verifica tus permisos.';
-            return;
+        if (!/^([0-9a-f]{6})$/i.test(hex)) {
+            return '';
         }
 
         createStyles();
@@ -438,37 +437,24 @@
 
         zoomSection.appendChild(zoomColumns);
 
-        const actions = document.createElement('div');
-        actions.className = 'spv-pdf-settings-actions';
-        const saveButton = document.createElement('button');
-        saveButton.type = 'submit';
-        saveButton.className = 'button button-primary';
-        saveButton.textContent = 'Guardar cambios';
-        const resetButton = document.createElement('button');
-        resetButton.type = 'button';
-        resetButton.className = 'button';
-        resetButton.textContent = 'Restablecer predeterminados';
-        actions.appendChild(saveButton);
-        actions.appendChild(resetButton);
+    function initColorControls(form) {
+        var pairs = [];
+        var controls = form.querySelectorAll('.spv-color-control');
 
-        resetButton.addEventListener('click', function () {
-            fillForm(data.defaults);
-            showMessage('Valores restablecidos a los predeterminados. No olvides guardar.', 'notice-warning');
-        });
+        Array.prototype.forEach.call(controls, function (control) {
+            var colorInput = control.querySelector('input[type="color"]');
+            var hexInput = control.querySelector('.spv-color-code');
 
-        form.appendChild(themeSection);
-        form.appendChild(highlightSection);
-        form.appendChild(watermarkSection);
-        form.appendChild(zoomSection);
-        form.appendChild(actions);
+            if (!colorInput || !hexInput) {
+                return;
+            }
 
-        root.appendChild(form);
-        root.appendChild(message);
+            pairs.push({ color: colorInput, hex: hexInput });
 
-        form.addEventListener('submit', function (event) {
-            event.preventDefault();
-            saveSettings();
-        });
+            colorInput.addEventListener('input', function () {
+                hexInput.value = colorInput.value.toUpperCase();
+                hexInput.classList.remove('is-invalid');
+            });
 
         const watermarkPreviewCtx = watermarkPreviewCanvas.getContext('2d');
         const previewSampleData = {
@@ -671,50 +657,26 @@
             message.className = 'spv-pdf-settings-message notice ' + (type || 'notice-success');
         }
 
-        function disableForm(isDisabled) {
-            const controls = form.querySelectorAll('input, textarea, button');
-            controls.forEach(function (el) {
-                el.disabled = isDisabled;
+            hexInput.addEventListener('blur', function () {
+                var normalized = normalizeHex(hexInput.value) || colorInput.value;
+                colorInput.value = normalized;
+                hexInput.value = normalized.toUpperCase();
+                hexInput.classList.remove('is-invalid');
             });
-        }
+        });
 
-        function saveSettings() {
-            disableForm(true);
-            showMessage('Guardando ajustes...', 'notice-info');
-
-            const payload = collectPayload();
-
-            window.fetch(data.restUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-WP-Nonce': data.nonce
-                },
-                body: JSON.stringify(payload)
-            })
-                .then(function (response) {
-                    if (!response.ok) {
-                        throw new Error('Error HTTP ' + response.status);
-                    }
-                    return response.json();
-                })
-                .then(function (result) {
-                    if (result && result.settings) {
-                        data.defaults = result.settings;
-                        fillForm(result.settings);
-                        showMessage('Ajustes guardados correctamente.', 'notice-success');
-                    } else {
-                        showMessage('Los ajustes se guardaron pero la respuesta fue inesperada.', 'notice-warning');
-                    }
-                })
-                .catch(function (error) {
-                    console.error('SPV settings error:', error);
-                    showMessage('Error al guardar los ajustes: ' + error.message, 'notice-error');
-                })
-                .finally(function () {
-                    disableForm(false);
+        form.addEventListener('reset', function () {
+            window.requestAnimationFrame(function () {
+                pairs.forEach(function (pair) {
+                    pair.hex.value = pair.color.value.toUpperCase();
+                    pair.hex.classList.remove('is-invalid');
                 });
-        }
+            });
+        });
+    }
+
+    function initTokenButtons(form) {
+        var buttons = form.querySelectorAll('[data-insert-token]');
 
         function collectPayload() {
             const payload = {
@@ -735,29 +697,37 @@
                 max_zoom: parseFloat(document.getElementById('spv-zoom-max').value) || 3
             };
 
-            Object.keys(colorLabels).forEach(function (key) {
-                const el = document.getElementById('spv-color-' + key);
-                if (el) {
-                    payload.highlight_colors[key] = el.value;
+                if (!token || !textarea) {
+                    return;
+                }
+
+                var start = textarea.selectionStart || 0;
+                var end = textarea.selectionEnd || 0;
+                var value = textarea.value || '';
+                textarea.value = value.slice(0, start) + token + value.slice(end);
+
+                var cursor = start + token.length;
+                textarea.focus();
+                if (typeof textarea.setSelectionRange === 'function') {
+                    textarea.setSelectionRange(cursor, cursor);
                 }
             });
-
-            Object.keys(themeInputs).forEach(function (key) {
-                if (themeInputs[key]) {
-                    payload.theme_colors[key] = themeInputs[key].value;
-                }
-            });
-
-            if (payload.min_zoom > payload.max_zoom) {
-                payload.min_zoom = data.defaults.min_zoom;
-                payload.max_zoom = data.defaults.max_zoom;
-            }
-
-            return payload;
-        }
-
-        fillForm(data.defaults);
+        });
     }
 
-    document.addEventListener('DOMContentLoaded', renderApp);
+    function boot() {
+        var form = document.getElementById('spv-pdf-settings-form');
+        if (!form) {
+            return;
+        }
+
+        initColorControls(form);
+        initTokenButtons(form);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
+    }
 })();

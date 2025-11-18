@@ -75,13 +75,26 @@ class SPV_PDF_Settings {
      * @return array
      */
     public static function get_settings() {
-        $stored = get_option( self::OPTION_NAME, array() );
+        $stored   = get_option( self::OPTION_NAME, array() );
+        $defaults = self::get_default_settings();
 
         if ( empty( $stored ) || ! is_array( $stored ) ) {
-            return self::get_default_settings();
+            return $defaults;
         }
 
-        return array_merge( self::get_default_settings(), $stored );
+        $settings = wp_parse_args( $stored, $defaults );
+
+        $settings['highlight_colors'] = wp_parse_args(
+            isset( $stored['highlight_colors'] ) && is_array( $stored['highlight_colors'] ) ? $stored['highlight_colors'] : array(),
+            $defaults['highlight_colors']
+        );
+
+        $settings['theme_colors'] = wp_parse_args(
+            isset( $stored['theme_colors'] ) && is_array( $stored['theme_colors'] ) ? $stored['theme_colors'] : array(),
+            $defaults['theme_colors']
+        );
+
+        return $settings;
     }
 
     /**

@@ -121,7 +121,9 @@
             this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
 
-            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, (window.spvViewerSettings && window.spvViewerSettings.defaults) || {});
+            const perViewerSettings = this.container.data('viewer-settings') || this.container.data('viewerSettings') || {};
+            const globalSettings = (window.spvViewerSettings && window.spvViewerSettings.defaults) || {};
+            this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, globalSettings, perViewerSettings);
 
             this.applyThemeColors();
 
@@ -143,6 +145,9 @@
             this.userDisplayName = userData.name || userData.display_name || '';
             this.userName = this.userLogin || this.userDisplayName || 'Usuario';
             this.userEmail = userData.email || '';
+            this.userRole = userData.role || '';
+            this.userLogin = userData.login || '';
+            this.siteInfo = siteInfo;
 
             // Highlights system
             this.highlights = {}; // { highlightId: Highlight }
@@ -429,7 +434,7 @@
                     return;
                 }
 
-                const color = this.getHighlightColor(btn.key);
+                const color = button.data('color') || this.getHighlightColor(btn.key);
                 const textColor = this.getAccessibleTextColor(color);
 
                 button.css({

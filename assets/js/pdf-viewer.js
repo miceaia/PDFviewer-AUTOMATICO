@@ -467,35 +467,51 @@
             return luminance > 0.6 ? '#333333' : '#ffffff';
         }
 
-        getWatermarkPlaceholderValues() {
+        normalizeWatermarkTemplate(template) {
+            if (typeof template !== 'string') {
+                return '';
+            }
+
+            return template
+                .replace(/&(lcub|#123|#x7b);/gi, '{')
+                .replace(/&(rcub|#125|#x7d);/gi, '}');
+        }
+
+        escapeTokenForRegex(token) {
+            return token.replace(/[-/\^$*+?.()|[\]{}]/g, '\\$&');
+        }
+
+        getWatermarkTemplateReplacements() {
             const now = new Date();
-            const localeDate = now.toLocaleDateString();
-            const localeDateTime = now.toLocaleString();
-            const localeTime = now.toLocaleTimeString();
-            const timezone = (typeof Intl !== 'undefined' && Intl.DateTimeFormat)
-                ? Intl.DateTimeFormat().resolvedOptions().timeZone
-                : '';
-            const usernameFallback = this.userLogin || this.userName;
-            const nameFallback = this.userDisplayName || this.userName;
+            const date = now.toLocaleDateString();
+            const time = now.toLocaleTimeString();
+            const dateTime = now.toLocaleString();
+            const timestamp = now.toISOString();
+            const username = this.userName || '';
+            const email = this.userEmail || '';
+            const pdfId = this.pdfId || '';
+            const userId = this.userId || '';
 
             return {
-                username: usernameFallback,
-                user_name: usernameFallback,
-                userlogin: usernameFallback,
-                name: nameFallback,
-                full_name: nameFallback,
-                email: this.userEmail,
-                user_email: this.userEmail,
-                userid: this.userId,
-                user_id: this.userId,
-                pdfid: this.pdfId,
-                pdf_id: this.pdfId,
-                date: localeDate,
-                date_short: localeDate,
-                time: localeTime,
-                datetime: localeDateTime,
-                timestamp: now.toISOString(),
-                timezone: timezone
+                '{user_name}': username,
+                '{user_email}': email,
+                '{pdf_id}': pdfId,
+                '{user_id}': userId,
+                '{date}': date,
+                '{time}': time,
+                '{datetime}': dateTime,
+                '{timestamp}': timestamp,
+                '{{username}}': username,
+                '{{user_name}}': username,
+                '{{name}}': username,
+                '{{email}}': email,
+                '{{user_email}}': email,
+                '{{user_id}}': userId,
+                '{{pdf_id}}': pdfId,
+                '{{date}}': date,
+                '{{time}}': time,
+                '{{datetime}}': dateTime,
+                '{{timestamp}}': timestamp
             };
         }
 
@@ -505,34 +521,19 @@
                 return '';
             }
 
-            const replacements = this.getWatermarkPlaceholderValues();
+            let normalized = this.normalizeWatermarkTemplate(template);
+            const replacements = this.getWatermarkTemplateReplacements();
 
-            return resolveWatermarkTemplate(template, replacements);
-        }
+            Object.keys(replacements).forEach((token) => {
+                const value = typeof replacements[token] === 'undefined' || replacements[token] === null
+                    ? ''
+                    : String(replacements[token]);
 
-        getWatermarkPositions(position) {
-            const width = this.canvas.width;
-            const height = this.canvas.height;
-            const basePositions = {
-                center: [ { x: width / 2, y: height / 2 } ],
-                top_left: [ { x: width * 0.2, y: height * 0.2 } ],
-                top_right: [ { x: width * 0.8, y: height * 0.2 } ],
-                bottom_left: [ { x: width * 0.2, y: height * 0.8 } ],
-                bottom_right: [ { x: width * 0.8, y: height * 0.8 } ],
-                tile: [
-                    { x: width / 2, y: height / 2 },
-                    { x: width * 0.2, y: height * 0.2 },
-                    { x: width * 0.8, y: height * 0.2 },
-                    { x: width * 0.2, y: height * 0.8 },
-                    { x: width * 0.8, y: height * 0.8 }
-                ]
-            };
+                const pattern = new RegExp(this.escapeTokenForRegex(token), 'gi');
+                normalized = normalized.replace(pattern, value);
+            });
 
-            if (!position || !basePositions[position]) {
-                return basePositions.center;
-            }
-
-            return basePositions[position];
+            return normalized;
         }
 
         addWatermarkToPage() {

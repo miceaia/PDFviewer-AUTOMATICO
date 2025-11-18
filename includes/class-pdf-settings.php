@@ -58,7 +58,7 @@ class SPV_PDF_Settings {
                 'base_contrast' => '#ffffff',
             ),
             'watermark_enabled'   => 1,
-            'watermark_text'      => 'Usuario: {user_name} · Fecha: {date}',
+            'watermark_text'      => 'Usuario: {{username}} · Fecha: {{date}}',
             'watermark_color'     => '#000000',
             'watermark_opacity'   => 0.15,
             'watermark_font_size' => 14,

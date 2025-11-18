@@ -1,6 +1,8 @@
 (function($) {
     'use strict';
 
+    const WATERMARK_TOKEN_REGEX = /\{\{\s*([^}]+)\s*\}\}|\{([^}]+)\}/g;
+
     const DEFAULT_VIEWER_SETTINGS = {
         default_zoom: 1.5,
         min_zoom: 0.5,
@@ -27,6 +29,83 @@
         watermark_position: 'center',
         copy_protection: 1
     };
+
+    function normalizeTemplateText(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        return value
+            .replace(/&(?:#123|#x7b|lcub);/gi, '{')
+            .replace(/&(?:#125|#x7d|rcub);/gi, '}');
+    }
+
+    function resolveWatermarkTemplate(template, replacements) {
+        if (!template || typeof template !== 'string') {
+            return '';
+        }
+
+        const normalizedTemplate = normalizeTemplateText(template);
+
+        return normalizedTemplate.replace(WATERMARK_TOKEN_REGEX, (match, doubleToken, singleToken) => {
+            const rawToken = (doubleToken || singleToken || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9_]/g, '');
+
+            if (!rawToken) {
+                return '';
+            }
+
+            if (Object.prototype.hasOwnProperty.call(replacements, rawToken)) {
+                const value = replacements[rawToken];
+                return typeof value === 'undefined' || value === null ? '' : String(value);
+            }
+
+            return '';
+        });
+    }
+
+    function decodeHtmlEntities(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+
+        return value
+            .replace(/&quot;/g, '"')
+            .replace(/&#039;/g, "'")
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&');
+    }
+
+    function parseUserInfoPayload($element) {
+        if (!$element || !$element.length) {
+            return {};
+        }
+
+        const dataValue = $element.data('user-info');
+        if (dataValue && typeof dataValue === 'object') {
+            return dataValue;
+        }
+
+        if (typeof dataValue === 'string') {
+            try {
+                return JSON.parse(dataValue);
+            } catch (error) {
+                // Continue to attribute fallback
+            }
+        }
+
+        const attrValue = $element.attr('data-user-info');
+        if (typeof attrValue === 'string' && attrValue.length) {
+            try {
+                return JSON.parse(decodeHtmlEntities(attrValue));
+            } catch (error) {
+                return {};
+            }
+        }
+
+        return {};
+    }
 
     // Configurar PDF.js worker
     if (typeof pdfjsLib !== 'undefined') {
@@ -60,10 +139,11 @@
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
 
             // Usuario
-            const userData = this.container.data('user-info') || this.container.data('userInfo') || {};
-            const siteInfo = this.container.data('site-info') || this.container.data('siteInfo') || {};
-            this.userId = userData.id || 'anonymous';
-            this.userName = userData.name || 'Usuario';
+            const userData = parseUserInfoPayload(this.container);
+            this.userId = userData.id || userData.user_id || 'anonymous';
+            this.userLogin = userData.username || userData.user_login || '';
+            this.userDisplayName = userData.name || userData.display_name || '';
+            this.userName = this.userLogin || this.userDisplayName || 'Usuario';
             this.userEmail = userData.email || '';
             this.userRole = userData.role || '';
             this.userLogin = userData.login || '';
@@ -389,18 +469,33 @@
 
         getWatermarkPlaceholderValues() {
             const now = new Date();
+            const localeDate = now.toLocaleDateString();
+            const localeDateTime = now.toLocaleString();
+            const localeTime = now.toLocaleTimeString();
+            const timezone = (typeof Intl !== 'undefined' && Intl.DateTimeFormat)
+                ? Intl.DateTimeFormat().resolvedOptions().timeZone
+                : '';
+            const usernameFallback = this.userLogin || this.userName;
+            const nameFallback = this.userDisplayName || this.userName;
+
             return {
-                username: this.userName,
-                user_name: this.userName,
-                name: this.userName,
+                username: usernameFallback,
+                user_name: usernameFallback,
+                userlogin: usernameFallback,
+                name: nameFallback,
+                full_name: nameFallback,
                 email: this.userEmail,
                 user_email: this.userEmail,
                 userid: this.userId,
                 user_id: this.userId,
                 pdfid: this.pdfId,
                 pdf_id: this.pdfId,
-                date: now.toLocaleDateString(),
-                datetime: now.toLocaleString()
+                date: localeDate,
+                date_short: localeDate,
+                time: localeTime,
+                datetime: localeDateTime,
+                timestamp: now.toISOString(),
+                timezone: timezone
             };
         }
 
@@ -410,33 +505,9 @@
                 return '';
             }
 
-            const fallbackOrigin = window.location && window.location.origin
-                ? window.location.origin
-                : `${window.location.protocol}//${window.location.host}`;
+            const replacements = this.getWatermarkPlaceholderValues();
 
-            const replacements = {
-                '{user_name}': this.userName,
-                '{user_email}': this.userEmail,
-                '{user_id}': this.userId,
-                '{user_role}': this.userRole,
-                '{user_login}': this.userLogin,
-                '{date}': new Date().toLocaleDateString(),
-                '{pdf_id}': this.pdfId,
-                '{site_name}': (this.siteInfo && this.siteInfo.name) || document.title || '',
-                '{site_url}': (this.siteInfo && this.siteInfo.url) || fallbackOrigin || ''
-            };
-
-            let text = template;
-
-            return template.replace(/\{\{\s*([^}]+)\s*\}\}|\{([^}]+)\}/g, (match, doubleToken, singleToken) => {
-                const rawToken = (doubleToken || singleToken || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
-                if (!rawToken) {
-                    return '';
-                }
-                return Object.prototype.hasOwnProperty.call(replacements, rawToken)
-                    ? replacements[rawToken]
-                    : '';
-            });
+            return resolveWatermarkTemplate(template, replacements);
         }
 
         getWatermarkPositions(position) {

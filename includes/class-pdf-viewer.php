@@ -22,17 +22,13 @@ class SPV_PDF_Viewer {
         $user_roles   = is_array( $current_user->roles ) ? $current_user->roles : array();
 
         $user_data = array(
-            'name'  => $current_user->display_name,
-            'email' => $current_user->user_email,
-            'id'    => $current_user->ID,
-            'role'  => reset( $user_roles ) ?: '',
-            'login' => $current_user->user_login,
+            'name'     => $current_user->display_name,
+            'username' => $current_user->user_login,
+            'email'    => $current_user->user_email,
+            'id'       => $current_user->ID,
         );
 
-        $site_data = array(
-            'name' => get_bloginfo( 'name' ),
-            'url'  => home_url(),
-        );
+        $user_data_attribute = esc_attr( wp_json_encode( $user_data ) );
 
         ob_start();
         ?>
@@ -40,9 +36,7 @@ class SPV_PDF_Viewer {
              style="width: <?php echo esc_attr($width); ?>; height: <?php echo esc_attr($height); ?>;"
              data-pdf-url="<?php echo esc_url($pdf_url); ?>"
              data-pdf-id="<?php echo esc_attr($pdf_id); ?>"
-             data-user-info='<?php echo esc_attr( wp_json_encode( $user_data ) ); ?>'
-             data-site-info='<?php echo esc_attr( wp_json_encode( $site_data ) ); ?>'
-             data-viewer-settings='<?php echo esc_attr( wp_json_encode( $viewer_settings ) ); ?>'>
+             data-user-info='<?php echo $user_data_attribute; ?>'>
 
             <?php if ($title): ?>
                 <h3 class="spv-title"><?php echo esc_html($title); ?></h3>

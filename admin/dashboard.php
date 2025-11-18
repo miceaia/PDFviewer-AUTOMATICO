@@ -188,7 +188,7 @@ if ( ! function_exists( 'cloudsync_render_admin_page' ) ) {
                 <section class="cloudsync-card cloudsync-card--pdf-settings" aria-live="polite">
                     <h2><?php esc_html_e( 'Ajustes PDF', 'secure-pdf-viewer' ); ?></h2>
                     <p class="description">
-                        <?php esc_html_e( 'Personaliza los colores del visor, define los valores de zoom y crea una marca de agua dinámica usando las variables disponibles.', 'secure-pdf-viewer' ); ?>
+                        <?php esc_html_e( 'Personaliza los colores, zoom predeterminado y la marca de agua que verán tus usuarios en el visor de PDF. Puedes usar las variables {{username}}, {{email}}, {{pdfId}} y {{date}} dentro del texto de la marca de agua.', 'secure-pdf-viewer' ); ?>
                     </p>
                     <form method="post" action="<?php echo esc_url( admin_url( 'options.php' ) ); ?>" id="spv-pdf-settings-form" class="spv-pdf-settings-form">
                         <?php settings_fields( 'spv_pdf_viewer' ); ?>

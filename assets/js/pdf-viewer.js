@@ -1,6 +1,8 @@
 (function($) {
     'use strict';
 
+    const WATERMARK_TOKEN_REGEX = /\{\{\s*([^}]+)\s*\}\}|\{([^}]+)\}/g;
+
     const DEFAULT_VIEWER_SETTINGS = {
         default_zoom: 1.5,
         min_zoom: 0.5,
@@ -18,13 +20,92 @@
             base_contrast: '#ffffff'
         },
         watermark_enabled: 1,
-        watermark_text: 'Usuario: {user_name} · Fecha: {date}',
+        watermark_text: 'Usuario: {{username}} · Fecha: {{date}}',
         watermark_color: '#000000',
         watermark_opacity: 0.15,
         watermark_font_size: 14,
+        watermark_font_family: 'Arial',
         watermark_rotation: -30,
+        watermark_position: 'center',
         copy_protection: 1
     };
+
+    function normalizeTemplateText(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        return value
+            .replace(/&(?:#123|#x7b|lcub);/gi, '{')
+            .replace(/&(?:#125|#x7d|rcub);/gi, '}');
+    }
+
+    function resolveWatermarkTemplate(template, replacements) {
+        if (!template || typeof template !== 'string') {
+            return '';
+        }
+
+        const normalizedTemplate = normalizeTemplateText(template);
+
+        return normalizedTemplate.replace(WATERMARK_TOKEN_REGEX, (match, doubleToken, singleToken) => {
+            const rawToken = (doubleToken || singleToken || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9_]/g, '');
+
+            if (!rawToken) {
+                return '';
+            }
+
+            if (Object.prototype.hasOwnProperty.call(replacements, rawToken)) {
+                const value = replacements[rawToken];
+                return typeof value === 'undefined' || value === null ? '' : String(value);
+            }
+
+            return '';
+        });
+    }
+
+    function decodeHtmlEntities(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+
+        return value
+            .replace(/&quot;/g, '"')
+            .replace(/&#039;/g, "'")
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&');
+    }
+
+    function parseUserInfoPayload($element) {
+        if (!$element || !$element.length) {
+            return {};
+        }
+
+        const dataValue = $element.data('user-info');
+        if (dataValue && typeof dataValue === 'object') {
+            return dataValue;
+        }
+
+        if (typeof dataValue === 'string') {
+            try {
+                return JSON.parse(dataValue);
+            } catch (error) {
+                // Continue to attribute fallback
+            }
+        }
+
+        const attrValue = $element.attr('data-user-info');
+        if (typeof attrValue === 'string' && attrValue.length) {
+            try {
+                return JSON.parse(decodeHtmlEntities(attrValue));
+            } catch (error) {
+                return {};
+            }
+        }
+
+        return {};
+    }
 
     // Configurar PDF.js worker
     if (typeof pdfjsLib !== 'undefined') {
@@ -56,9 +137,11 @@
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
 
             // Usuario
-            const userData = this.container.data('user-info') || {};
-            this.userId = userData.id || 'anonymous';
-            this.userName = userData.name || 'Usuario';
+            const userData = parseUserInfoPayload(this.container);
+            this.userId = userData.id || userData.user_id || 'anonymous';
+            this.userLogin = userData.username || userData.user_login || '';
+            this.userDisplayName = userData.name || userData.display_name || '';
+            this.userName = this.userLogin || this.userDisplayName || 'Usuario';
             this.userEmail = userData.email || '';
 
             // Highlights system
@@ -379,27 +462,72 @@
             return luminance > 0.6 ? '#333333' : '#ffffff';
         }
 
+        getWatermarkPlaceholderValues() {
+            const now = new Date();
+            const localeDate = now.toLocaleDateString();
+            const localeDateTime = now.toLocaleString();
+            const localeTime = now.toLocaleTimeString();
+            const timezone = (typeof Intl !== 'undefined' && Intl.DateTimeFormat)
+                ? Intl.DateTimeFormat().resolvedOptions().timeZone
+                : '';
+            const usernameFallback = this.userLogin || this.userName;
+            const nameFallback = this.userDisplayName || this.userName;
+
+            return {
+                username: usernameFallback,
+                user_name: usernameFallback,
+                userlogin: usernameFallback,
+                name: nameFallback,
+                full_name: nameFallback,
+                email: this.userEmail,
+                user_email: this.userEmail,
+                userid: this.userId,
+                user_id: this.userId,
+                pdfid: this.pdfId,
+                pdf_id: this.pdfId,
+                date: localeDate,
+                date_short: localeDate,
+                time: localeTime,
+                datetime: localeDateTime,
+                timestamp: now.toISOString(),
+                timezone: timezone
+            };
+        }
+
         getWatermarkText() {
             const template = this.preferences.watermark_text || '';
             if (!template) {
                 return '';
             }
 
-            const replacements = {
-                '{user_name}': this.userName,
-                '{user_email}': this.userEmail,
-                '{date}': new Date().toLocaleDateString(),
-                '{pdf_id}': this.pdfId
+            const replacements = this.getWatermarkPlaceholderValues();
+
+            return resolveWatermarkTemplate(template, replacements);
+        }
+
+        getWatermarkPositions(position) {
+            const width = this.canvas.width;
+            const height = this.canvas.height;
+            const basePositions = {
+                center: [ { x: width / 2, y: height / 2 } ],
+                top_left: [ { x: width * 0.2, y: height * 0.2 } ],
+                top_right: [ { x: width * 0.8, y: height * 0.2 } ],
+                bottom_left: [ { x: width * 0.2, y: height * 0.8 } ],
+                bottom_right: [ { x: width * 0.8, y: height * 0.8 } ],
+                tile: [
+                    { x: width / 2, y: height / 2 },
+                    { x: width * 0.2, y: height * 0.2 },
+                    { x: width * 0.8, y: height * 0.2 },
+                    { x: width * 0.2, y: height * 0.8 },
+                    { x: width * 0.8, y: height * 0.8 }
+                ]
             };
 
-            let text = template;
+            if (!position || !basePositions[position]) {
+                return basePositions.center;
+            }
 
-            Object.keys(replacements).forEach(token => {
-                const value = replacements[token] || '';
-                text = text.replace(new RegExp(token, 'g'), value);
-            });
-
-            return text;
+            return basePositions[position];
         }
 
         addWatermarkToPage() {
@@ -417,19 +545,26 @@
             this.ctx.globalAlpha = this.preferences.watermark_opacity || 0.15;
             this.ctx.fillStyle = this.preferences.watermark_color || '#000000';
             const fontSize = this.preferences.watermark_font_size || 14;
-            this.ctx.font = `${fontSize}px Arial`;
+            const fontFamily = this.preferences.watermark_font_family || 'Arial';
+            this.ctx.font = `${fontSize}px ${fontFamily}`;
+            this.ctx.textAlign = 'center';
+            this.ctx.textBaseline = 'middle';
 
-            const centerX = this.canvas.width / 2;
-            const centerY = this.canvas.height / 2;
+            const rotationRadians = ((typeof this.preferences.watermark_rotation === 'number'
+                ? this.preferences.watermark_rotation
+                : -30) * Math.PI) / 180;
 
-            this.ctx.translate(centerX, centerY);
-            const rotationRadians = (this.preferences.watermark_rotation || -30) * Math.PI / 180;
-            this.ctx.rotate(rotationRadians);
+            const positions = this.getWatermarkPositions(this.preferences.watermark_position);
 
-            const textWidth = this.ctx.measureText(watermarkText).width;
-            this.ctx.fillText(watermarkText, -textWidth / 2, 0);
-            this.ctx.fillText(watermarkText, -textWidth / 2, -this.canvas.height / 3);
-            this.ctx.fillText(watermarkText, -textWidth / 2, this.canvas.height / 3);
+            positions.forEach((point) => {
+                this.ctx.save();
+                this.ctx.translate(point.x, point.y);
+                if (rotationRadians) {
+                    this.ctx.rotate(rotationRadians);
+                }
+                this.ctx.fillText(watermarkText, 0, 0);
+                this.ctx.restore();
+            });
 
             this.ctx.restore();
         }

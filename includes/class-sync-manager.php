@@ -433,6 +433,13 @@ class CloudSync_Manager {
             SPV_PLUGIN_VERSION
         );
 
+        wp_enqueue_style(
+            'spv-pdf-settings-admin',
+            SPV_PLUGIN_URL . 'assets/css/pdf-settings-admin.css',
+            array(),
+            SPV_PLUGIN_VERSION
+        );
+
         wp_enqueue_script(
             'cloudsync-explorer',
             SPV_PLUGIN_URL . 'assets/js/cloudsync-explorer.js',
@@ -465,16 +472,6 @@ class CloudSync_Manager {
             array(),
             SPV_PLUGIN_VERSION,
             true
-        );
-
-        wp_localize_script(
-            'spv-pdf-settings',
-            'spvPdfSettings',
-            array(
-                'restUrl'  => rest_url( 'secure-pdf-viewer/v1/settings' ),
-                'nonce'    => wp_create_nonce( 'wp_rest' ),
-                'defaults' => SPV_PDF_Settings::get_settings(),
-            )
         );
     }
 

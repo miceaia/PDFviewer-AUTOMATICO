@@ -133,6 +133,11 @@
                 return;
             }
 
+            if (typeof pdfjsLib === 'undefined' || typeof pdfjsLib.getDocument !== 'function') {
+                this.displayBootstrapError('PDF.js no está disponible en esta página.');
+                return;
+            }
+
             const perViewerSettings = this.container.data('viewer-settings') || this.container.data('viewerSettings') || {};
             const globalSettings = (window.spvViewerSettings && window.spvViewerSettings.defaults) || {};
             this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, globalSettings, perViewerSettings);
@@ -149,6 +154,7 @@
             this.minScale = this.preferences.min_zoom;
             this.highlightOpacity = this.preferences.highlight_opacity;
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
+            this.userAdjustedZoom = false;
 
             // Usuario
             const userData = this.getUserInfoPayload();
@@ -280,6 +286,11 @@
             try {
                 this.showLoading();
 
+                if (!this.pdfUrl) {
+                    this.showError('No se encontró la URL del PDF a cargar.');
+                    return;
+                }
+
                 const loadingTask = pdfjsLib.getDocument({
                     url: this.pdfUrl,
                     withCredentials: false
@@ -318,15 +329,30 @@
                 const page = await this.pdfDoc.getPage(pageNum);
 
                 const originalViewport = page.getViewport({ scale: 1.0 });
-                const containerWidth = this.canvasContainer.width() - 40;
-                const containerScale = containerWidth / originalViewport.width;
-                const effectiveScale = this.scale;
+                const containerWidth = Math.max(this.canvasContainer.width() - 40, 0);
+                const containerScale = containerWidth > 0
+                    ? containerWidth / originalViewport.width
+                    : null;
+
+                let effectiveScale = this.scale;
+
+                if (!this.userAdjustedZoom && containerScale) {
+                    effectiveScale = Math.max(
+                        this.minScale,
+                        Math.min(this.maxScale, containerScale)
+                    );
+                    this.scale = effectiveScale;
+                    this.updateZoomLabel();
+                }
 
                 const viewport = page.getViewport({ scale: effectiveScale });
 
                 // Ajustar canvas
                 this.canvas.width = viewport.width;
                 this.canvas.height = viewport.height;
+                this.canvas.style.width = `${viewport.width}px`;
+                this.canvas.style.height = `${viewport.height}px`;
+                this.canvasContainer.css('min-height', `${viewport.height + 40}px`);
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
                 // Renderizar PDF
@@ -1026,12 +1052,14 @@
         }
 
         zoomIn() {
+            this.userAdjustedZoom = true;
             this.scale = Math.min(this.scale + 0.1, this.maxScale);
             this.updateZoomLabel();
             this.renderPage(this.currentPage);
         }
 
         zoomOut() {
+            this.userAdjustedZoom = true;
             this.scale = Math.max(this.scale - 0.1, this.minScale);
             this.updateZoomLabel();
             this.renderPage(this.currentPage);

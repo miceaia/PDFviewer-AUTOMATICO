@@ -73,13 +73,26 @@ class SPV_PDF_Settings {
      * @return array
      */
     public static function get_settings() {
-        $stored = get_option( self::OPTION_NAME, array() );
+        $stored   = get_option( self::OPTION_NAME, array() );
+        $defaults = self::get_default_settings();
 
         if ( empty( $stored ) || ! is_array( $stored ) ) {
-            return self::get_default_settings();
+            return $defaults;
         }
 
-        return array_merge( self::get_default_settings(), $stored );
+        $settings = wp_parse_args( $stored, $defaults );
+
+        $settings['highlight_colors'] = wp_parse_args(
+            isset( $stored['highlight_colors'] ) && is_array( $stored['highlight_colors'] ) ? $stored['highlight_colors'] : array(),
+            $defaults['highlight_colors']
+        );
+
+        $settings['theme_colors'] = wp_parse_args(
+            isset( $stored['theme_colors'] ) && is_array( $stored['theme_colors'] ) ? $stored['theme_colors'] : array(),
+            $defaults['theme_colors']
+        );
+
+        return $settings;
     }
 
     /**
@@ -146,6 +159,20 @@ class SPV_PDF_Settings {
         $sanitized['watermark_opacity']   = self::sanitize_number( $input, 'watermark_opacity', $defaults['watermark_opacity'], 0, 1 );
         $sanitized['watermark_font_size'] = self::sanitize_number( $input, 'watermark_font_size', $defaults['watermark_font_size'], 8, 72 );
         $sanitized['watermark_rotation']  = self::sanitize_number( $input, 'watermark_rotation', $defaults['watermark_rotation'], -90, 90 );
+
+        $allowed_fonts = array( 'Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana', 'Roboto', 'Monospace' );
+        $font_family   = isset( $input['watermark_font_family'] ) ? sanitize_text_field( $input['watermark_font_family'] ) : $defaults['watermark_font_family'];
+        if ( ! in_array( $font_family, $allowed_fonts, true ) ) {
+            $font_family = $defaults['watermark_font_family'];
+        }
+        $sanitized['watermark_font_family'] = $font_family;
+
+        $allowed_positions = array( 'center', 'tile', 'top_left', 'top_right', 'bottom_left', 'bottom_right' );
+        $position          = isset( $input['watermark_position'] ) ? sanitize_key( $input['watermark_position'] ) : $defaults['watermark_position'];
+        if ( ! in_array( $position, $allowed_positions, true ) ) {
+            $position = $defaults['watermark_position'];
+        }
+        $sanitized['watermark_position'] = $position;
         $sanitized['copy_protection']     = empty( $input['copy_protection'] ) ? 0 : 1;
 
         return $sanitized;
@@ -277,10 +304,20 @@ class SPV_PDF_Settings {
                 'required'          => false,
                 'sanitize_callback' => 'floatval',
             ),
+            'watermark_font_family' => array(
+                'type'              => 'string',
+                'required'          => false,
+                'sanitize_callback' => 'sanitize_text_field',
+            ),
             'watermark_rotation' => array(
                 'type'              => 'number',
                 'required'          => false,
                 'sanitize_callback' => 'floatval',
+            ),
+            'watermark_position' => array(
+                'type'              => 'string',
+                'required'          => false,
+                'sanitize_callback' => 'sanitize_key',
             ),
             'copy_protection' => array(
                 'type'              => 'boolean',
@@ -358,7 +395,9 @@ class SPV_PDF_Settings {
             'watermark_color'   => $settings['watermark_color'],
             'watermark_opacity' => (float) $settings['watermark_opacity'],
             'watermark_font_size'=> (float) $settings['watermark_font_size'],
+            'watermark_font_family' => $settings['watermark_font_family'],
             'watermark_rotation'=> (float) $settings['watermark_rotation'],
+            'watermark_position'=> $settings['watermark_position'],
             'copy_protection'   => (int) $settings['copy_protection'],
         );
     }

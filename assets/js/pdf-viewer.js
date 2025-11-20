@@ -36,9 +36,26 @@
             this.container = $(container);
             this.pdfUrl = this.container.data('pdf-url');
             this.pdfId = this.container.data('pdf-id') || 'default';
-            this.canvas = this.container.find('.spv-pdf-canvas')[0];
-            this.ctx = this.canvas.getContext('2d');
             this.canvasContainer = this.container.find('.spv-canvas-container');
+            this.canvas = this.canvasContainer.find('.spv-pdf-canvas')[0] || null;
+
+            if (!this.canvas && this.canvasContainer.length) {
+                this.canvas = document.createElement('canvas');
+                this.canvas.className = 'spv-pdf-canvas';
+                this.canvasContainer.first().prepend(this.canvas);
+            }
+
+            this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+
+            if (!this.canvasContainer.length || !this.canvas || !this.ctx) {
+                this.displayBootstrapError('No se pudo inicializar el lienzo del visor.');
+                return;
+            }
+
+            if (typeof pdfjsLib === 'undefined' || typeof pdfjsLib.getDocument !== 'function') {
+                this.displayBootstrapError('PDF.js no está disponible en esta página.');
+                return;
+            }
 
             this.preferences = $.extend(true, {}, DEFAULT_VIEWER_SETTINGS, (window.spvViewerSettings && window.spvViewerSettings.defaults) || {});
 
@@ -54,9 +71,10 @@
             this.minScale = this.preferences.min_zoom;
             this.highlightOpacity = this.preferences.highlight_opacity;
             this.watermarkEnabled = !!this.preferences.watermark_enabled;
+            this.userAdjustedZoom = false;
 
             // Usuario
-            const userData = this.container.data('user-info') || {};
+            const userData = this.getUserInfoPayload();
             this.userId = userData.id || 'anonymous';
             this.userName = userData.name || 'Usuario';
             this.userEmail = userData.email || '';
@@ -182,6 +200,11 @@
             try {
                 this.showLoading();
 
+                if (!this.pdfUrl) {
+                    this.showError('No se encontró la URL del PDF a cargar.');
+                    return;
+                }
+
                 const loadingTask = pdfjsLib.getDocument({
                     url: this.pdfUrl,
                     withCredentials: false
@@ -220,15 +243,30 @@
                 const page = await this.pdfDoc.getPage(pageNum);
 
                 const originalViewport = page.getViewport({ scale: 1.0 });
-                const containerWidth = this.canvasContainer.width() - 40;
-                const containerScale = containerWidth / originalViewport.width;
-                const effectiveScale = this.scale;
+                const containerWidth = Math.max(this.canvasContainer.width() - 40, 0);
+                const containerScale = containerWidth > 0
+                    ? containerWidth / originalViewport.width
+                    : null;
+
+                let effectiveScale = this.scale;
+
+                if (!this.userAdjustedZoom && containerScale) {
+                    effectiveScale = Math.max(
+                        this.minScale,
+                        Math.min(this.maxScale, containerScale)
+                    );
+                    this.scale = effectiveScale;
+                    this.updateZoomLabel();
+                }
 
                 const viewport = page.getViewport({ scale: effectiveScale });
 
                 // Ajustar canvas
                 this.canvas.width = viewport.width;
                 this.canvas.height = viewport.height;
+                this.canvas.style.width = `${viewport.width}px`;
+                this.canvas.style.height = `${viewport.height}px`;
+                this.canvasContainer.css('min-height', `${viewport.height + 40}px`);
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
                 // Renderizar PDF
@@ -379,27 +417,191 @@
             return luminance > 0.6 ? '#333333' : '#ffffff';
         }
 
+        getUserInfoPayload() {
+            const dataValue = this.container.data('user-info');
+
+            if (dataValue && typeof dataValue === 'object') {
+                return dataValue;
+            }
+
+            const attempts = [];
+            const seen = new Set();
+            const format = (this.container.attr('data-user-info-format') || '').toLowerCase();
+            const maybeBase64 = format === 'base64';
+
+            const pushCandidate = (candidate, options = {}) => {
+                if (typeof candidate !== 'string') {
+                    return;
+                }
+
+                const trimmed = candidate.trim();
+                if (!trimmed || seen.has(trimmed)) {
+                    return;
+                }
+
+                seen.add(trimmed);
+                attempts.push(trimmed);
+
+                const forceBase64 = options.forceBase64 || maybeBase64;
+                if (forceBase64 || this.looksLikeBase64(trimmed)) {
+                    const decoded = this.decodeBase64Value(trimmed);
+                    if (decoded && !seen.has(decoded)) {
+                        seen.add(decoded);
+                        attempts.push(decoded);
+                    }
+                }
+            };
+
+            if (typeof dataValue === 'string') {
+                pushCandidate(dataValue);
+            }
+
+            const attrValue = this.container.attr('data-user-info');
+            pushCandidate(attrValue, { forceBase64: maybeBase64 });
+
+            const decodedAttr = this.decodeHtmlEntities(attrValue);
+            if (decodedAttr && decodedAttr !== attrValue) {
+                pushCandidate(decodedAttr, { forceBase64: maybeBase64 });
+            }
+
+            const scriptValue = this.getUserInfoScriptPayload();
+            if (scriptValue) {
+                pushCandidate(scriptValue);
+            }
+
+            for (let i = 0; i < attempts.length; i++) {
+                const parsed = this.safeJsonParse(attempts[i]);
+                if (parsed) {
+                    return parsed;
+                }
+            }
+
+            return {};
+        }
+
+        decodeHtmlEntities(value) {
+            if (typeof value !== 'string' || value.indexOf('&') === -1) {
+                return value || '';
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = value;
+            return textarea.value;
+        }
+
+        getUserInfoScriptPayload() {
+            const script = this.container.find('script.spv-user-info').first();
+            if (!script.length) {
+                return '';
+            }
+
+            return script.text().trim();
+        }
+
+        looksLikeBase64(value) {
+            if (typeof value !== 'string') {
+                return false;
+            }
+
+            const sanitized = value.replace(/\s+/g, '');
+            if (!sanitized || sanitized.length % 4 !== 0) {
+                return false;
+            }
+
+            return /^[A-Za-z0-9+/=]+$/.test(sanitized);
+        }
+
+        decodeBase64Value(value) {
+            if (typeof value !== 'string' || typeof window.atob !== 'function') {
+                return '';
+            }
+
+            try {
+                return window.atob(value.replace(/\s+/g, ''));
+            } catch (error) {
+                return '';
+            }
+        }
+
+        safeJsonParse(value) {
+            if (typeof value !== 'string' || !value.trim()) {
+                return null;
+            }
+
+            try {
+                return JSON.parse(value);
+            } catch (error) {
+                return null;
+            }
+        }
+
+        normalizeWatermarkTemplate(template) {
+            if (typeof template !== 'string') {
+                return '';
+            }
+
+            return template
+                .replace(/&(lcub|#123|#x7b);/gi, '{')
+                .replace(/&(rcub|#125|#x7d);/gi, '}');
+        }
+
+        escapeTokenForRegex(token) {
+            return token.replace(/[-/\^$*+?.()|[\]{}]/g, '\\$&');
+        }
+
+        getWatermarkTemplateReplacements() {
+            const now = new Date();
+            const date = now.toLocaleDateString();
+            const time = now.toLocaleTimeString();
+            const dateTime = now.toLocaleString();
+            const timestamp = now.toISOString();
+            const username = this.userName || '';
+            const email = this.userEmail || '';
+            const pdfId = this.pdfId || '';
+            const userId = this.userId || '';
+
+            return {
+                '{user_name}': username,
+                '{user_email}': email,
+                '{pdf_id}': pdfId,
+                '{user_id}': userId,
+                '{date}': date,
+                '{time}': time,
+                '{datetime}': dateTime,
+                '{timestamp}': timestamp,
+                '{{username}}': username,
+                '{{user_name}}': username,
+                '{{name}}': username,
+                '{{email}}': email,
+                '{{user_email}}': email,
+                '{{user_id}}': userId,
+                '{{pdf_id}}': pdfId,
+                '{{date}}': date,
+                '{{time}}': time,
+                '{{datetime}}': dateTime,
+                '{{timestamp}}': timestamp
+            };
+        }
+
         getWatermarkText() {
             const template = this.preferences.watermark_text || '';
             if (!template) {
                 return '';
             }
 
-            const replacements = {
-                '{user_name}': this.userName,
-                '{user_email}': this.userEmail,
-                '{date}': new Date().toLocaleDateString(),
-                '{pdf_id}': this.pdfId
-            };
+            let normalized = this.normalizeWatermarkTemplate(template);
+            const replacements = this.getWatermarkTemplateReplacements();
 
-            let text = template;
+            Object.keys(replacements).forEach((token) => {
+                const value = typeof replacements[token] === 'undefined' || replacements[token] === null
+                    ? ''
+                    : String(replacements[token]);
 
-            Object.keys(replacements).forEach(token => {
-                const value = replacements[token] || '';
-                text = text.replace(new RegExp(token, 'g'), value);
+                const pattern = new RegExp(this.escapeTokenForRegex(token), 'gi');
+                normalized = normalized.replace(pattern, value);
             });
 
-            return text;
+            return normalized;
         }
 
         addWatermarkToPage() {
@@ -757,12 +959,14 @@
         }
 
         zoomIn() {
+            this.userAdjustedZoom = true;
             this.scale = Math.min(this.scale + 0.1, this.maxScale);
             this.updateZoomLabel();
             this.renderPage(this.currentPage);
         }
 
         zoomOut() {
+            this.userAdjustedZoom = true;
             this.scale = Math.max(this.scale - 0.1, this.minScale);
             this.updateZoomLabel();
             this.renderPage(this.currentPage);
@@ -984,6 +1188,22 @@
                 message +
                 '</div>'
             );
+        }
+
+        displayBootstrapError(message) {
+            console.error(message);
+            this.container.addClass('spv-viewer--error');
+            const canvasContainer = this.container.find('.spv-canvas-container');
+
+            if (canvasContainer.length) {
+                canvasContainer.empty().append(
+                    $('<div class="spv-error" role="alert"></div>').text(message)
+                );
+            } else {
+                this.container.prepend(
+                    $('<div class="spv-error" role="alert"></div>').text(message)
+                );
+            }
         }
     }
 
